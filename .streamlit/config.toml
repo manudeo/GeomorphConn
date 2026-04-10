@@ -1,2 +1,13 @@
 [server]
 maxUploadSize = 4096
+# Keep WebSocket alive — prevents Windows from dropping idle connections
+# after a few minutes (not needed on WSL2/Linux where the kernel keeps sockets open)
+headless = true
+enableWebsocketCompression = false
+
+[browser]
+# Disable usage-stats pings that can interfere with the connection
+gatherUsageStats = false
+
+[client]
+showErrorDetails = false
