@@ -95,7 +95,7 @@ provided:
 
 - `RainfallWeight` — normalised rainfall; high rainfall → high erosive potential.
 - `NDVIWeight` — NDVI-derived C-factor proxy $C = (1 - \text{NDVI})/2$;
-  the formulation of @Cavalli2013; combined rainfall + NDVI weighting after @Dubey2026.
+  the formulation of @Singh2017; combined rainfall + NDVI weighting after @Dubey2026.
 - `LandCoverWeight` — maps integer land-cover class codes to USLE/RUSLE C-factors
   [@Wischmeier1978; @Borselli2008] via a lookup table.  Built-in tables are
   provided for ESA WorldCover 10 m [@WorldCover2021], CORINE Land Cover 2018,
@@ -260,13 +260,33 @@ Python API (minimum):
 
 ```python
 import numpy as np
+import rioxarray as rxr
 from landlab import RasterModelGrid
 from geomorphconn.components import ConnectivityIndex
 
-grid = RasterModelGrid((200, 200), xy_spacing=30.0)
-grid.add_field("topographic__elevation", np.random.rand(grid.number_of_nodes), at="node")
-ic = ConnectivityIndex(grid)
+# Read GeoTIFF inputs as xarray DataArray objects
+dem_da = rxr.open_rasterio("dem.tif", masked=True).squeeze(drop=True)
+ndvi_da = rxr.open_rasterio("ndvi.tif", masked=True).squeeze(drop=True)
+rain_da = rxr.open_rasterio("rainfall.tif", masked=True).squeeze(drop=True)
+
+# Convert to 2D numpy arrays (north-up raster convention)
+dem2d = np.asarray(dem_da.values, dtype=float)
+ndvi2d = np.asarray(ndvi_da.values, dtype=float)
+rain2d = np.asarray(rain_da.values, dtype=float)
+
+# Build Landlab grid (south-up node convention)
+dx = abs(float(dem_da.rio.transform().a))
+grid = RasterModelGrid(dem2d.shape, xy_spacing=dx)
+grid.add_field("topographic__elevation", np.flipud(dem2d).ravel(), at="node")
+
+ic = ConnectivityIndex(
+  grid,
+  ndvi=np.flipud(ndvi2d).ravel(),
+  rainfall=np.flipud(rain2d).ravel(),
+)
 ic.run_one_step()
+
+ic_map = np.flipud(grid.at_node["connectivity_index__IC"].reshape(dem2d.shape))
 ```
 
 The two computationally intensive operations — weighted upstream flow accumulation
