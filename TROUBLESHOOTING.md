@@ -82,6 +82,24 @@ Fix:
 
 ## Windows-specific issues
 
+### Streamlit GUI loses connection after a few minutes of inactivity
+
+Cause:
+Windows' TCP stack aggressively closes idle socket connections, which drops the
+WebSocket link between the browser and the Streamlit server. This does not
+happen on WSL2/Linux because the Linux kernel keeps idle sockets open longer.
+
+Fix:
+The project's `.streamlit/config.toml` already sets `headless = true` and
+`enableWebsocketCompression = false` to mitigate this. If you still see
+disconnections:
+
+- Refresh the browser tab — Streamlit will reconnect automatically.
+- Make sure you are running from the project directory so that
+  `.streamlit/config.toml` is picked up.
+- Do not use the `streamlit run` command directly; always use
+  `geomorphconn gui` so the config file is found correctly.
+
 ### `PermissionError: [WinError 32]` during temporary-file cleanup
 
 Cause:
@@ -114,34 +132,24 @@ This only changes policy for the current shell session.
 
 ## Output issues
 
-### Target pixels show IC values (should be masked)
+### Target cells are `NaN` in the IC output — is this correct?
 
-Cause:
-The run was not in target mode, or an older build was used where target cells
-were not explicitly masked in outputs.
+Yes, this is expected behaviour. Cells belonging to the target geometry
+(river network, reservoir boundary, etc.) represent the sink of the downstream
+path; their own IC value is undefined and is written as `NaN`. Values in the
+cells immediately adjacent to the target are valid and represent the impedance
+to the nearest target cell.
 
-Fix:
-- In GUI, set `IC mode` to `Target`.
-- Update to the latest code/package and rerun.
+If all cells appear as `NaN`, the target geometry likely does not overlap the
+DEM extent — see *Target vector produces no target nodes* above.
 
-Expected behavior:
-- Cells that belong to the target geometry are written as `NaN` in IC outputs.
-- Values around the target boundary are still valid (they represent impedance
-   to the target), but cells inside the target mask should be `NaN`.
+### Are depressions filled before routing?
 
-### Sink/depression artefacts still visible in flow outputs
-
-Cause:
-If depressions are not explicitly filled before routing, local pits can create
-artefacts in flow direction/accumulation and downstream IC patterns.
-
-Fix:
-- In GUI, enable `Fill sinks before routing (ArcGIS-like)`.
-
-Why this matches ArcGIS:
-- ArcGIS workflows typically follow `Fill -> FlowDirection -> FlowAccumulation`.
-- GeomorphConn now supports the same sequence by explicitly applying
-   `SinkFillerBarnes` before routing.
+Yes, by default. GeomorphConn applies `SinkFillerBarnes` before flow routing,
+replicating the ArcGIS-style `Fill → FlowDirection → FlowAccumulation`
+workflow. This is enabled by default (`fill_sinks=True`) and can be toggled via
+the `Fill sinks before routing` checkbox in the GUI or the `fill_sinks` parameter
+in the Python API.
 
 ### Output filenames are not what I expected
 
@@ -165,36 +173,62 @@ Fix:
 
 ## Large DEM / MemoryError
 
+### Which flow director should I use for large catchments?
+
+This is the most important question for large-area runs:
+
+| Flow director | Memory use (relative) | Recommended for |
+|---|---|---|
+| **D8** | Low (1×) | Any catchment size; safest default |
+| DINF | Very high (≈10–20×) | Small to medium areas only (<5 M nodes) |
+| MFD | Very high (≈10–20×) | Small to medium areas only (<5 M nodes) |
+
+**Rule of thumb:** if your DEM has more than ~5 million nodes (e.g. anything
+larger than roughly 2000 × 2500 pixels), use **D8**. DINF and MFD are
+theoretically more realistic for diffuse hillslope flow but become
+prohibitively expensive on large grids.
+
+**For very large areas (regional/national scale):** the ArcGIS tools in
+`arcgis_tools/` are the recommended route. ArcGIS handles large rasters in
+tiled chunks and does not require the entire grid to fit in RAM.
+
 ### `MemoryError: Unable to allocate X GiB for an array with shape (...)` in the GUI or CLI
 
 Cause:
 Landlab's DINF and MFD flow directors build dense 8-neighbour arrays (shape
 `n_nodes × 8`) in one contiguous allocation. For a ~30 M-node DEM (≈5500 × 5500
-pixels at 1 m resolution) that is ~1.8 GiB per internal array. Several such arrays
-are needed simultaneously. Even with large physical RAM, Windows heap fragmentation
-can block a single contiguous allocation of this size.
+pixels at 1 m resolution) that is ~1.8 GiB per internal array. Several such
+arrays are needed simultaneously. Even with large physical RAM, Windows heap
+fragmentation can block a single contiguous allocation of this size.
 
 Dask and Numba do not help here — the allocation happens inside Landlab's own
 internals, not in IC computation loops.
 
-Fix — choose one or more:
+Fix — in order of preference:
 
-1. **Increase the DEM coarsen factor in the GUI** (selectbox in the settings
+1. **Switch the Flow director to D8.** D8 stores one receiver per node and
+   uses ≤10 % of the memory that DINF or MFD require for the same grid.
+   For large catchments D8 is the right choice.
+
+2. **Use the ArcGIS tools** (`arcgis_tools/`). The ModelBuilder scripts handle
+   large rasters in tiled blocks and are not memory-limited in the same way.
+
+3. **Increase the DEM coarsen factor in the GUI** (selectbox in the settings
    column). Factor 2 reduces node count to ¼; factor 4 reduces it to 1/16.
+   Appropriate when you need DINF/MFD but cannot switch to ArcGIS.
 
-2. **Switch the Flow director to D8**. D8 only stores one receiver per node
-   and needs far less memory than DINF or MFD for the same grid.
-
-3. **Reduce input resolution before uploading**. Reproject the DEM to a coarser
+4. **Reduce input resolution before uploading.** Reproject the DEM to a coarser
    resolution in QGIS or with `gdalwarp` before starting the GUI.
 
-4. **Run in WSL2** (Linux). The Linux kernel memory allocator handles large
+5. **Run in WSL2** (Linux). The Linux kernel memory allocator handles large
    contiguous requests more reliably than the Windows heap.
 
-Quick memory estimate for DINF:
-- 5 M nodes → ~3.2 GiB peak internal (DINF)
+Quick memory estimate for DINF/MFD:
+- 1 M nodes → ~0.6 GiB peak
+- 5 M nodes → ~3.2 GiB peak
 - 10 M nodes → ~6.4 GiB peak
 - 30 M nodes → ~19 GiB peak
+
 D8 typically uses ≤10 % of those figures.
 
 ---
