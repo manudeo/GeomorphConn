@@ -271,6 +271,22 @@ def _run_command(args) -> int:
 
     _show_progress(2, total_steps, "Building IC configuration")
 
+    # ── Memory warning for large grids with DINF/MFD ─────────────────────────
+    n_nodes = grid.number_of_nodes
+    _LARGE_GRID_THRESHOLD = 5_000_000
+    if args.flow_director in ("DINF", "MFD") and n_nodes > _LARGE_GRID_THRESHOLD:
+        n_M = n_nodes / 1e6
+        est_ram_gb = n_nodes * 8 * 8 / 1e9  # 8 neighbours × 8 bytes × n_nodes
+        print(
+            f"\nWARNING: Large grid detected — {n_M:.1f} M nodes with {args.flow_director}.\n"
+            f"  Estimated peak RAM: ~{est_ram_gb:.0f} GB.\n"
+            f"  If this is killed or runs out of memory, rerun with --flow-director D8\n"
+            f"  (D8 uses ~10% of the memory of DINF/MFD for the same grid).\n"
+            f"  For very large areas, consider the ArcGIS tools in arcgis_tools/.\n",
+            flush=True,
+        )
+    # ─────────────────────────────────────────────────────────────────────────
+
     if use_supplied_weight:
         if user_weight is None:
             print("Error: weight raster missing after preprocessing.", file=sys.stderr)
@@ -314,7 +330,17 @@ def _run_command(args) -> int:
         )
 
     _show_progress(3, total_steps, "Running IC computation")
-    ic.run_one_step()
+    try:
+        ic.run_one_step()
+    except MemoryError:
+        print(
+            "\nMemoryError: not enough contiguous RAM to complete the computation.\n"
+            "  → Rerun with --flow-director D8 (uses ~10% of DINF/MFD memory).\n"
+            "  → Or use the ArcGIS tools in arcgis_tools/ for large areas.\n"
+            "  → See TROUBLESHOOTING.md for a full explanation.",
+            file=sys.stderr,
+        )
+        return 1
 
     out_dir = Path(args.out_dir)
     outputs = args.outputs
