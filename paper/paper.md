@@ -53,11 +53,11 @@ management-focused analyses [@Singh2017; @Singh2019; @Singh2020; @Singh2022a;
 @Singh2022b].
 
 `GeomorphConn` is an open-source Python package that implements the IC through
-a formal [Landlab](https://landlab.readthedocs.io) component—`ConnectivityIndex`
-—that conforms to Landlab's component interface and conventions [@Hobley2017;
-@Barnhart2020]. The component is extended with two physically motivated
-hydrological weighting terms: (1) normalised rainfall, and (2) an NDVI-based
-C-factor proxy for vegetation-mediated erosion resistance. These extensions make the IC explicitly
+a `ConnectivityIndex` class written in [Landlab](https://landlab.readthedocs.io)
+component style, designed to facilitate future integration with the Landlab
+ecosystem [@Hobley2017; @Barnhart2020]. The implementation is extended with two
+physically motivated hydrological weighting terms: (1) normalised rainfall, and
+(2) an NDVI-based C-factor proxy for vegetation-mediated erosion resistance. These extensions make the IC explicitly
 responsive to hydrological forcing rather than solely to topographic structure
 and land cover. A companion Google Earth Engine (GEE) data-fetching module,
 built on the `xee` [@xee2023] backend, allows all three required inputs — DEM,
