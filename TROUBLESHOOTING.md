@@ -145,11 +145,13 @@ DEM extent — see *Target vector produces no target nodes* above.
 
 ### Are depressions filled before routing?
 
-Yes, by default. GeomorphConn applies `SinkFillerBarnes` before flow routing,
-replicating the ArcGIS-style `Fill → FlowDirection → FlowAccumulation`
-workflow. This is enabled by default (`fill_sinks=True`) and can be toggled via
-the `Fill sinks before routing` checkbox in the GUI or the `fill_sinks` parameter
-in the Python API.
+No, by default. GeomorphConn routes directly on the input DEM without
+modification. Sink-filling can be enabled via the `Fill sinks before routing`
+checkbox in the GUI or the `fill_sinks=True` parameter in the Python API if you
+want ArcGIS-style `Fill → FlowDirection → FlowAccumulation` workflow.
+
+Note: As of v0.1, `fill_sinks=False` (default) to preserve the original DEM.
+Earlier versions defaulted to `fill_sinks=True`.
 
 ### Output filenames are not what I expected
 
