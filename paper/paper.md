@@ -134,7 +134,7 @@ impedance, and antecedent-condition terms [@Zingaro2019; @Zanandrea2021].
 
 The IC is defined as [@Cavalli2013]:
 
-$$IC = \log_{10}\!\left(\frac{D_{up}}{D_{dn}}\right)$$
+$$IC = \log_{10}\left(\frac{D_{up}}{D_{dn}}\right)$$
 
 **Upstream component $D_{up}$** represents the potential of the upslope
 contributing area to deliver sediment to a given point:
@@ -172,6 +172,10 @@ interpretation: connectivity is simultaneously controlled by the erosive
 potential of rainfall on bare ground ($W$) and the slope-driven transport
 capacity ($S$).
 
+Supported GEE datasets used by `GeomorphConn.gee.GEEFetcher` are listed in
+Table @tbl:gee. Common `WeightBuilder` presets are summarised in
+Table @tbl:presets.
+
 | Dataset type | Source key | Collection / asset ID | Native scale |
 |---|---|---|---|
 | DEM | `SRTM` | USGS/SRTMGL1_003 | 30 m |
@@ -184,7 +188,7 @@ capacity ($S$).
 | NDVI | `LANDSAT8` | LANDSAT/LC08/C02/T1_L2 | 30 m |
 | NDVI | `LANDSAT9` | LANDSAT/LC09/C02/T1_L2 | 30 m |
 
-: Supported GEE datasets in `GeomorphConn.gee.GEEFetcher`. NDVI is computed
+Table: Supported GEE datasets in `GeomorphConn.gee.GEEFetcher`. NDVI is computed
 as a cloud-masked median composite over the specified date range.
 Rainfall is aggregated as a sum (CHIRPS, PERSIANN) or mean (ERA5).
 Land-cover data use the most recent available image. All outputs are
@@ -198,7 +202,7 @@ bilinear-resampled to the DEM grid before returning. {#tbl:gee}
 | `preset_rainfall_landcover` | RF + LC C-factor | Hydrology + land cover |
 | `preset_rainfall_ndvi_roughness` | RF + NDVI + TRI | Full three-component weight |
 
-: Preset `WeightBuilder` factory functions.  All return a `WeightBuilder`
+Table: Preset `WeightBuilder` factory functions. All return a `WeightBuilder`
 that can be further customised via `.add()`. {#tbl:presets}
 
 # Implementation
