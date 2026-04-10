@@ -65,7 +65,9 @@ cloud for any catchment on Earth. For users who work in ArcGIS Pro,
 functionally identical ModelBuilder scripts are provided in the repository. The
 package complements empirical connectivity assessments spanning floodplain and
 wetland systems [@Singh2020b; @Singh2021a; @Singh2021b], extending the IC
-framework to diverse hydromorphic and semi-arid contexts.
+framework to diverse hydromorphic and semi-arid contexts. The software is
+available through a Python API, a command-line interface, and a Streamlit GUI
+for interactive use.
 
 # Statement of Need
 
@@ -231,6 +233,41 @@ DEM, NDVI, rainfall, and (optionally) integer land-cover classification.
 
 The `utils` submodule provides `rasterize_targets` for converting vector target
 features to Landlab node arrays.
+
+`GeomorphConn` is available through three user-facing entry points:
+
+- **Python API** via :class:`ConnectivityIndex` and the composable
+  :class:`WeightBuilder` pipeline.
+- **CLI** via the `geomorphconn` command (`run`, `gee fetch`, and `gui`
+  subcommands).
+- **GUI** via the Streamlit frontend for interactive runs.
+
+Minimal usage examples are shown below.
+
+CLI (local rasters):
+
+```bash
+geomorphconn run --dem dem.tif --ndvi ndvi.tif --rainfall rain.tif --outputs IC
+```
+
+GUI launch:
+
+```bash
+geomorphconn gui --backend streamlit
+```
+
+Python API (minimum):
+
+```python
+import numpy as np
+from landlab import RasterModelGrid
+from geomorphconn.components import ConnectivityIndex
+
+grid = RasterModelGrid((200, 200), xy_spacing=30.0)
+grid.add_field("topographic__elevation", np.random.rand(grid.number_of_nodes), at="node")
+ic = ConnectivityIndex(grid)
+ic.run_one_step()
+```
 
 The two computationally intensive operations — weighted upstream flow accumulation
 and downstream path-length calculation — are sequential graph traversals over the
