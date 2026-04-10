@@ -110,7 +110,8 @@ def _ddn_d8_py(local_contrib, inv_WS, receivers, node_order):
     for node in node_order[::-1]:
         rec = int(receivers[node])
         if rec == node:                 # outlet / imposed sink
-            ddn[node] = inv_WS[node]
+            # Terminal nodes have zero downstream travel distance.
+            ddn[node] = 0.0
         else:
             ddn[node] = local_contrib[node] + ddn[rec]
     return ddn
@@ -149,7 +150,7 @@ if _NUMBA:
             node = node_order[i]
             rec  = receivers[node]
             if rec == node:
-                ddn[node] = inv_WS[node]
+                ddn[node] = 0.0
             else:
                 ddn[node] = local_contrib[node] + ddn[rec]
         return ddn
@@ -808,7 +809,7 @@ class ConnectivityIndex(Component):
             AccW = _acc_mfd(W, receivers, eff_props, node_order)
             AccS = _acc_mfd(S, receivers, eff_props, node_order)
 
-            if self._use_aspect_weighting:
+            if self._use_aspect_weighting or self._target_nodes is not None:
                 # Recompute contributing-cell count under modified partitioning.
                 AccA = _acc_mfd(np.ones(n_nodes, dtype=np.float64), receivers, eff_props, node_order)
                 ACC_final = np.maximum(AccA + 1.0, 1.0)
@@ -817,7 +818,14 @@ class ConnectivityIndex(Component):
         else:
             AccW = _acc_d8(W, receivers, node_order)
             AccS = _acc_d8(S, receivers, node_order)
-            ACC_final = np.maximum(DA / cell_area, 1.0)
+            if self._target_nodes is not None:
+                # In target mode, drainage_area from Landlab is computed before
+                # target outlets are imposed. Recompute contributing count from
+                # the modified receiver graph so each target acts as terminal.
+                AccA = _acc_d8(np.ones(n_nodes, dtype=np.float64), receivers, node_order)
+                ACC_final = np.maximum(AccA + 1.0, 1.0)
+            else:
+                ACC_final = np.maximum(DA / cell_area, 1.0)
 
         Wmean = (AccW + W) / ACC_final
         Smean = (AccS + S) / ACC_final

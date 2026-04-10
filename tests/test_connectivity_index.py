@@ -13,6 +13,7 @@ import pytest
 from landlab import RasterModelGrid
 
 from geomorphconn import ConnectivityIndex
+from geomorphconn.components.connectivity_index import _ddn_d8_py
 from geomorphconn.weights import (
     CustomWeight,
     LandCoverWeight,
@@ -264,6 +265,40 @@ class TestTargetMode:
         ic = ConnectivityIndex(grid, target_nodes=target)
         ic.run_one_step()
         assert np.isfinite(ic.IC).any()
+
+    def test_target_changes_Dup(self):
+        nrows, ncols = 25, 25
+        g1 = _make_grid(nrows=nrows, ncols=ncols)
+        g2 = _make_grid(nrows=nrows, ncols=ncols)
+
+        mid_row = nrows // 2
+        band = np.zeros((nrows, ncols), dtype=bool)
+        band[mid_row, :] = True
+        target_nodes = np.where(band.ravel())[0]
+
+        ConnectivityIndex(g1).run_one_step()
+        ConnectivityIndex(g2, target_nodes=target_nodes).run_one_step()
+
+        assert not np.allclose(
+            g1.at_node["connectivity_index__Dup"],
+            g2.at_node["connectivity_index__Dup"],
+            equal_nan=True,
+        )
+
+
+class TestDdnKernel:
+    def test_terminal_node_has_zero_ddn(self):
+        # 0 -> 1 -> 2, with 2 as terminal outlet.
+        local = np.array([2.0, 3.0, 0.0], dtype=np.float64)
+        inv_ws = np.array([1.0, 1.0, 5.0], dtype=np.float64)
+        recv = np.array([1, 2, 2], dtype=np.int64)
+        order = np.array([0, 1, 2], dtype=np.int64)
+
+        ddn = _ddn_d8_py(local, inv_ws, recv, order)
+
+        assert ddn[2] == pytest.approx(0.0)
+        assert ddn[1] == pytest.approx(3.0)
+        assert ddn[0] == pytest.approx(5.0)
 
 
 # ---------------------------------------------------------------------------
