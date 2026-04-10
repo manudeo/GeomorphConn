@@ -294,10 +294,11 @@ class ConnectivityIndex(Component):
         computed toward the natural basin outlet.  Provide via
         :func:`~GeomorphConn.utils.rasterize_targets`.
     fill_sinks : bool, optional
-        If *True* (default), fill depressions explicitly with
+        If *True*, fill depressions explicitly with
         :class:`landlab.components.SinkFillerBarnes` before flow routing.
-        This best matches the ArcGIS-style workflow of Fill -> FlowDirection ->
-        FlowAccumulation. Set to *False* to route directly on the input DEM.
+        This modifies the input DEM and best matches the ArcGIS-style workflow
+        of Fill -> FlowDirection -> FlowAccumulation. Default is *False*,
+        which routes directly on the input DEM without modification.
     use_aspect_weighting : bool, optional
         If *True*, apply an additional aspect-alignment weighting to
         multi-receiver upstream routing (DINF/MFD) during D_up accumulation.
@@ -418,7 +419,7 @@ class ConnectivityIndex(Component):
         rainfall=None,
         slope=None,
         target_nodes=None,
-        fill_sinks: bool = True,
+        fill_sinks: bool = False,
         use_aspect_weighting: bool = False,
         w_min: float = 0.005,
         w_max: float = 1.0,
@@ -433,12 +434,7 @@ class ConnectivityIndex(Component):
         self._w_max          = float(w_max)
         self._use_deg_approx = bool(use_degree_approx)
         self._use_aspect_weighting = bool(use_aspect_weighting)
-        # In target mode, fill_sinks=True distorts DEM and breaks IC computation.
-        # Default to False for target mode, True otherwise.
-        if target_nodes is not None and fill_sinks is True:
-            self._fill_sinks = False
-        else:
-            self._fill_sinks = bool(fill_sinks)
+        self._fill_sinks = bool(fill_sinks)
         n = grid.number_of_nodes
 
         # ── Slope (optional user-provided override) ────────────────────
