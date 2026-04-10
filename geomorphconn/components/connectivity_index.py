@@ -116,6 +116,42 @@ def _ddn_d8_py(local_contrib, inv_WS, receivers, node_order):
     return ddn
 
 
+def _target_connectivity_py(receivers, node_order, target_mask):
+    """
+    Mark nodes whose D8 path reaches any target node.
+    Traverse outlet-first (reversed topological order) so that when a node
+    is visited its receiver has already been evaluated.
+    """
+    connected = target_mask.copy()
+    n = len(node_order)
+    for i in range(n - 1, -1, -1):
+        node = node_order[i]
+        rec  = receivers[node]
+        if rec != node and connected[rec]:
+            connected[node] = True
+    return connected
+
+
+if _NUMBA:
+    @_njit(cache=True)
+    def _target_connectivity_jit(receivers, node_order, target_mask):
+        connected = target_mask.copy()
+        n = len(node_order)
+        for i in range(n - 1, -1, -1):
+            node = node_order[i]
+            rec  = receivers[node]
+            if rec != node and connected[rec]:
+                connected[node] = True
+        return connected
+
+    def _target_connectivity(rec, order, mask):
+        return _target_connectivity_jit(
+            rec.astype(np.int64), order.astype(np.int64), mask.astype(np.bool_)
+        )
+else:
+    _target_connectivity = _target_connectivity_py
+
+
 if _NUMBA:
     @_njit(cache=True)
     def _acc_d8_jit(weight, receivers, node_order):
@@ -606,12 +642,31 @@ class ConnectivityIndex(Component):
             )
 
         # In target mode, target cells are terminal masks (NoData in IC maps).
+        # Also mask cells whose D8 path never reaches a target node — they
+        # drain to the basin boundary instead, which produces physically
+        # meaningless IC values and visible artefact lines at watershed divides.
         if self._target_nodes is not None:
             IC[self._target_nodes] = np.nan
             Dup[self._target_nodes] = np.nan
             Ddn[self._target_nodes] = np.nan
             Wmean[self._target_nodes] = np.nan
             Smean[self._target_nodes] = np.nan
+
+            # Build connectivity mask: True where D8 path reaches a target.
+            # Traverse in outlet-first order (reversed topological) so that
+            # when we process a node its receiver has already been evaluated.
+            d8_recv = routing["d8_receivers"]
+            d8_order = routing["d8_node_order"]
+            target_mask = np.zeros(self._grid.number_of_nodes, dtype=bool)
+            target_mask[self._target_nodes] = True
+            connected = _target_connectivity(d8_recv, d8_order, target_mask)
+
+            not_connected = ~connected
+            IC[not_connected] = np.nan
+            Dup[not_connected] = np.nan
+            Ddn[not_connected] = np.nan
+            Wmean[not_connected] = np.nan
+            Smean[not_connected] = np.nan
 
         # 6. Write fields
         g = self._grid
