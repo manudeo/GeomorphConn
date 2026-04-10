@@ -13,6 +13,7 @@ build/
 htmlcov/
 *.tif
 *.tiff
+*.ovr
 *.nc
 output*/
 data/
