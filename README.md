@@ -31,36 +31,20 @@ Earth.
 
 ## Installation
 
+See **[INSTALLATION.md](INSTALLATION.md)** for full instructions including
+virtual-environment setup, optional extras, system requirements, and ArcGIS
+Pro toolbox setup.
+
+**Quick start (from source):**
+```bash
+git clone https://github.com/manudeo/GeomorphConn.git
+cd GeomorphConn
+python -m venv .venv && .venv\Scripts\activate  # Windows
+pip install -e ".[gui]"
+```
+
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common install, GUI, alignment,
 and target-vector issues.
-
-### Core (no GEE)
-```bash
-pip install geomorphconn
-```
-
-### With Google Earth Engine support
-```bash
-pip install "geomorphconn[gee]"
-```
-
-### With all optional dependencies
-```bash
-pip install "geomorphconn[all]"
-```
-
-### With GUI dependency only
-```bash
-pip install "geomorphconn[gui]"
-```
-
-The GUI extra now includes the vector-target stack used by IC-toward-target
-uploads (`geopandas`, `shapely`, `pyogrio`). If you installed an older GUI-only
-environment before this change, reinstall or upgrade with:
-
-```bash
-pip install -U "geomorphconn[gui]"
-```
 
 ---
 
