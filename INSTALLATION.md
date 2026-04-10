@@ -16,15 +16,17 @@ git clone https://github.com/manudeo/GeomorphConn.git
 cd GeomorphConn
 ```
 
-### 2. Create and activate a virtual environment
+### 2. Create and activate an environment
 
-**Windows (PowerShell):**
+**Option A — Python venv (no conda required)**
+
+Windows (PowerShell):
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-**macOS / Linux / WSL2:**
+macOS / Linux / WSL2:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -34,6 +36,22 @@ source .venv/bin/activate
 > ```powershell
 > Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 > ```
+
+**Option B — conda / mamba environment**
+
+```bash
+conda create -n geomorphconn python=3.11
+conda activate geomorphconn
+```
+
+Or with a custom environment name:
+```bash
+conda create -n myenv python=3.11
+conda activate myenv
+```
+
+> Python 3.11 is recommended for best compatibility with Landlab and Numba.
+> Any version from 3.10 to 3.13 is supported.
 
 ### 3. Install the package
 
