@@ -361,7 +361,11 @@ def _welcome_command(_args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="geomorphconn", description="GeomorphConn CLI")
+    parser = argparse.ArgumentParser(
+        prog="geomorphconn",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=_welcome_text(),
+    )
     parser.add_argument(
         "--version",
         action="version",
@@ -369,7 +373,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run_p = sub.add_parser("run", help="Run IC from DEM and selected weight-factor rasters")
+    run_p = sub.add_parser(
+        "run",
+        help="Run IC from DEM and selected weight-factor rasters",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=_welcome_text() + "Run IC computation from local raster files.\n",
+    )
     run_p.add_argument("--dem", required=True, help="Path to DEM GeoTIFF")
     run_p.add_argument("--ndvi", required=False, help="Path to NDVI GeoTIFF (required if 'ndvi' factor is selected)")
     run_p.add_argument(
