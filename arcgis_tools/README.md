@@ -27,7 +27,8 @@ The toolbox provides four model tools:
 - ICtargetwithNDVIRFweightCalc:
 	Computes rainfall/NDVI weighting first, then runs target-mode IC.
 - SurfaceRoughness:
-	Computes DEM-based surface roughness index used in roughness-driven weighting workflows.
+	Computes DEM-based surface roughness index used in roughness-driven weighting workflows,
+	following the Cavalli et al. (2008) roughness concept.
 
 ## Requirements
 
