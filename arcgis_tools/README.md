@@ -1,17 +1,24 @@
 # ArcGIS Pro Toolbox
 
-This folder contains an ArcGIS Pro toolbox that mirrors the core GeomorphConn workflows.
+This folder contains the latest ArcGIS Pro toolbox build for GeomorphConn-compatible IC workflows.
 
-## Included toolbox
+## Included file
 
 - ConnectivityTools.atbx
 
-The toolbox exposes four model tools:
+## Tools included in the toolbox
 
 - ICoutlet
 - ICoutletwithNDVIRFweightCalc
 - ICtarget
 - ICtargetwithNDVIRFweightCalc
+
+## What each tool does
+
+- ICoutlet: Computes IC toward the basin outlet using provided IC inputs.
+- ICoutletwithNDVIRFweightCalc: First computes W from rainfall and NDVI, then computes outlet-mode IC.
+- ICtarget: Computes IC toward a user-supplied target feature or target raster.
+- ICtargetwithNDVIRFweightCalc: First computes W from rainfall and NDVI, then computes target-mode IC.
 
 ## Requirements
 
@@ -22,7 +29,7 @@ The toolbox exposes four model tools:
 
 ## Notes
 
-- The ArcGIS models use ArcGIS Flow Direction / Flow Accumulation tools.
-- D8 is used for downstream path distance.
+- ArcGIS models rely on ArcGIS Flow Direction and Flow Accumulation tools.
+- D8 is used for downstream path distance in the ArcGIS workflow.
 - Weighted tools compute rainfall normalization and NDVI-based C-factor before W.
-- The Python package GeomorphConn implements the same IC formulation in Landlab.
+- The Python package GeomorphConn provides the same IC formulation using Landlab for scriptable workflows.
