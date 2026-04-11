@@ -14,6 +14,7 @@ The toolbox provides four model tools:
 - ICoutletwithNDVIRFweightCalc
 - ICtarget
 - ICtargetwithNDVIRFweightCalc
+- SurfaceRoughness
 
 ## Tool descriptions
 
@@ -25,6 +26,8 @@ The toolbox provides four model tools:
 	Computes IC toward user-defined target features (for example streams, channels, or other sinks).
 - ICtargetwithNDVIRFweightCalc:
 	Computes rainfall/NDVI weighting first, then runs target-mode IC.
+- SurfaceRoughness:
+	Computes DEM-based surface roughness index used in roughness-driven weighting workflows.
 
 ## Requirements
 
@@ -35,8 +38,13 @@ The toolbox provides four model tools:
 
 ## Performance tip (ArcGIS Environments)
 
-To speed up calculations, open the tool's **Environments** tab and set **Parallel Processing Factor**
-to a suitable value for your machine (for example `50%`, `75%`, or `100%`).
+To speed up calculations, open the tool's **Environments** tab and set **Parallel Processing Factor**.
+ArcGIS supports either:
+
+- a process count (for example `4`), or
+- a percent of available cores (for example `50%`, `75%`, `100%`).
+
+`0` disables parallel processing, and leaving it blank lets each tool choose its default.
 
 Use a lower value if your workstation is memory-limited or if multiple heavy GIS processes are running.
 
