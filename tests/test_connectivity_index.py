@@ -174,6 +174,12 @@ class TestOutputFields:
         ddn = grid.at_node["connectivity_index__Ddn"][grid.core_nodes]
         assert np.all(ddn >= 0)
 
+    def test_boundary_nodes_masked_in_outputs(self, grid):
+        ConnectivityIndex(grid).run_one_step()
+        boundary = np.where(grid.status_at_node != 0)[0]
+        ic = grid.at_node["connectivity_index__IC"]
+        assert np.all(~np.isfinite(ic[boundary]))
+
 
 # ---------------------------------------------------------------------------
 # Flow directors (Landlab backend)

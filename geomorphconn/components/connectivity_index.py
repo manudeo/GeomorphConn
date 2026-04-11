@@ -704,6 +704,17 @@ class ConnectivityIndex(Component):
             Smean[eff_targets] = np.nan
             ACCfinal[eff_targets] = np.nan
 
+        # Mask non-core boundary nodes: these are not part of the active
+        # computational domain and often show rectangular edge artefacts.
+        non_core = self._grid.status_at_node != 0
+        if np.any(non_core):
+            IC[non_core] = np.nan
+            Dup[non_core] = np.nan
+            Ddn[non_core] = np.nan
+            Wmean[non_core] = np.nan
+            Smean[non_core] = np.nan
+            ACCfinal[non_core] = np.nan
+
         # Optional analysis-domain mask (e.g., keep only main basin in target mode).
         explicit_mask_bool = routing.get("explicit_analysis_mask_bool")
         dominant_mask_bool = routing.get("dominant_basin_mask_bool")
