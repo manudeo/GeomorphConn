@@ -663,10 +663,12 @@ def main():
 - Cavalli et al. (2013), *Geomorphology*, 188, 31-41.
 - Crema & Cavalli (2018), *Computers & Geosciences*, 111, 39-45.
 
-### Authors
+### Script author
 - Manudeo Singh
-- Marco Cavalli
-- Stefano Crema
+
+### Method origin credits
+- IC methodology: Cavalli et al. (2013)
+- SedInConnect reference implementation: Crema & Cavalli (2018)
             """
         )
 

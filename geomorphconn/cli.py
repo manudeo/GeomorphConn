@@ -50,10 +50,12 @@ def _welcome_text() -> str:
         "- Cavalli et al. (2013), Geomorphology, 188, 31-41.\n"
         "- Crema & Cavalli (2018), Computers & Geosciences, 111, 39-45.\n"
         "\n"
-        "Authors:\n"
+        "Script author:\n"
         "- Manudeo Singh\n"
-        "- Marco Cavalli\n"
-        "- Stefano Crema\n"
+        "\n"
+        "Method origin credits:\n"
+        "- IC methodology: Cavalli et al. (2013)\n"
+        "- SedInConnect reference implementation: Crema & Cavalli (2018)\n"
     )
 
 
