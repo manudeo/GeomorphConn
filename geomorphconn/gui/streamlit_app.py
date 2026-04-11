@@ -56,6 +56,7 @@ def _compute_ic(
     w_max,
     user_weight,
     target_nodes,
+    stream_threshold,
     fill_sinks,
 ):
     if ndvi is not None and dem.shape != ndvi.shape:
@@ -73,6 +74,7 @@ def _compute_ic(
             "flow_director": flow_director,
             "weight": np.flipud(user_weight).ravel(),
             "target_nodes": target_nodes,
+            "stream_threshold": stream_threshold,
             "w_min": w_min,
             "w_max": w_max,
             "use_degree_approx": use_degree_approx,
@@ -97,6 +99,7 @@ def _compute_ic(
             "flow_director": flow_director,
             "weight": wb,
             "target_nodes": target_nodes,
+            "stream_threshold": stream_threshold,
             "w_min": w_min,
             "w_max": w_max,
             "use_degree_approx": use_degree_approx,
@@ -472,7 +475,7 @@ def main():
         )
         fill_sinks = st.checkbox(
             "Fill sinks before routing (ArcGIS-like)",
-            value=True,
+            value=False,
             help="If enabled, depressions are explicitly filled before flow direction/accumulation (Fill -> FlowDirection -> FlowAccumulation). Disable only for diagnostic comparisons.",
         )
         available_refs = ["dem"]
@@ -543,8 +546,19 @@ def main():
 
     target_vector_path = None
     target_files = None
+    stream_threshold = None
     if target_mode == "Target":
         st.subheader("Target settings")
+        stream_threshold = st.number_input(
+            "Stream generation threshold (cells)",
+            min_value=1,
+            value=1000,
+            step=100,
+            help=(
+                "Cells with D8 upstream count >= this threshold are treated as stream/target cells. "
+                "This matches the Borselli ArcGIS channel-mask concept and can be used with or without a vector target."
+            ),
+        )
         if "target_vector_path_value" not in st.session_state:
             st.session_state["target_vector_path_value"] = ""
 
@@ -685,8 +699,8 @@ def main():
         if save_outputs and not output_keys:
             st.error("Select at least one output layer to save.")
             return
-        if target_mode == "Target" and not (target_vector_path and target_vector_path.strip()) and not target_files:
-            st.error("Target mode requires either a local target vector path or an uploaded target vector.")
+        if target_mode == "Target" and (stream_threshold is None) and not (target_vector_path and target_vector_path.strip()) and not target_files:
+            st.error("Target mode requires a stream threshold and/or a target vector (path or upload).")
             return
 
         progress.progress(15)
@@ -787,6 +801,7 @@ def main():
                 float(w_max),
                 user_weight,
                 target_nodes,
+                int(stream_threshold) if stream_threshold is not None else None,
                 fill_sinks,
             )
         except MemoryError:  # pragma: no cover
