@@ -230,17 +230,20 @@ GUI output layer meanings:
 ### IC toward outlet — from a GeoTIFF
 ```python
 import numpy as np
-import rasterio
+import xarray as xr
+import rioxarray  # registers .rio accessor for GeoTIFF metadata
 from landlab import RasterModelGrid
 from geomorphconn.components import ConnectivityIndex
 
 # Load inputs
-with rasterio.open("dem.tif") as src:
-    dem = src.read(1).astype(float)
-    dx  = src.res[0]
+dem_da = xr.load_dataarray("dem.tif").squeeze(drop=True)
+ndvi_da = xr.load_dataarray("ndvi.tif").squeeze(drop=True)
+rainfall_da = xr.load_dataarray("rainfall.tif").squeeze(drop=True)
 
-with rasterio.open("ndvi.tif")     as src: ndvi     = src.read(1).astype(float)
-with rasterio.open("rainfall.tif") as src: rainfall = src.read(1).astype(float)
+dem = dem_da.values.astype(float)
+ndvi = ndvi_da.values.astype(float)
+rainfall = rainfall_da.values.astype(float)
+dx = float(abs(dem_da.rio.resolution()[0]))
 
 # Build Landlab grid (flipud: GeoTIFF is top-down, Landlab is bottom-up)
 grid = RasterModelGrid(dem.shape, xy_spacing=dx)
@@ -249,7 +252,7 @@ grid.add_field("topographic__elevation", np.flipud(dem).ravel(), at="node")
 # Run IC
 ic = ConnectivityIndex(
     grid,
-    flow_director="FlowDirectorDINF",   # D8 | FlowDirectorDINF | FlowDirectorMFD
+    flow_director="DINF",   # D8 | DINF | MFD
     ndvi=np.flipud(ndvi).ravel(),
     rainfall=np.flipud(rainfall).ravel(),
 )
@@ -262,7 +265,7 @@ IC_map = np.flipud(grid.at_node["connectivity_index__IC"].reshape(dem.shape))
 ```python
 ic = ConnectivityIndex(
     grid,
-    flow_director="FlowDirectorDINF",
+    flow_director="DINF",
     ndvi=np.flipud(ndvi).ravel(),
     rainfall=np.flipud(rainfall).ravel(),
     use_aspect_weighting=True,  # default is False
@@ -272,13 +275,13 @@ ic.run_one_step()
 
 `use_aspect_weighting` is disabled by default to preserve existing behavior.
 When enabled, it only affects multi-receiver upstream accumulation
-(`FlowDirectorDINF` / `FlowDirectorMFD`) in `D_up`; `D_dn` remains D8-based.
+(`DINF` / `MFD`) in `D_up`; `D_dn` remains D8-based.
 
 ### IC toward a river shapefile
 ```python
 from geomorphconn.utils import rasterize_targets
 
-target_nodes = rasterize_targets("river.shp", grid, dem_transform=src.transform)
+target_nodes = rasterize_targets("river.shp", grid, dem_transform=dem_da.rio.transform())
 
 ic = ConnectivityIndex(
     grid,
