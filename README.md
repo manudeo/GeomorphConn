@@ -393,7 +393,7 @@ with Spatial Analyst, 3D Analyst, and Image Analyst licences. See
 
 GeomorphConn has been applied to the **Moscardo catchment**, a highly active debris-flow system in the Italian Alps.
 The example below demonstrates IC computation at **1 m resolution (coarsened to 2 m)** using D-infinity flow routing
-with `DepressionFinderAndRouter` and surface roughness impedance weights (Cavalli 2008).
+with `DepressionFinderAndRouter` and surface roughness impedance weights (Cavalli and Marchi, 2008).
 
 ### Moscardo Catchment, Italian Alps (Italy)
 
@@ -406,7 +406,7 @@ with `DepressionFinderAndRouter` and surface roughness impedance weights (Cavall
 **Parameters:**
 - Flow director: D-infinity (distributed multi-receiver flow)
 - Depression handler: DepressionFinderAndRouter (routes through pits without modifying DEM)
-- Weights: Surface roughness impedance (Cavalli et al. 2008)
+- Weights: Surface roughness impedance (Cavalli and Marchi, 2008)
 - No explicit target; IC computed toward basin outlet
 - Grid: 1,417 rows × 1,833 cols @ 2 m resolution
 
@@ -424,7 +424,7 @@ with `DepressionFinderAndRouter` and surface roughness impedance weights (Cavall
 **Parameters:**
 - Flow director: D-infinity
 - Depression handler: DepressionFinderAndRouter
-- Weights: Surface roughness impedance (Cavalli et al. 2008)
+- Weights: Surface roughness impedance (Cavalli and Marchi, 2008)
 - Main-basin-only masking: Enabled (dominant outlet footprint)
 - Target: Auto-detected stream network (cells draining ≥1,000 upslope cells)
 - Grid: 1,417 rows × 1,833 cols @ 2 m resolution

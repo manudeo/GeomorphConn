@@ -165,7 +165,7 @@ class NDVIWeight:
 
 class SurfaceRoughnessWeight:
     """
-    Surface roughness weight derived from DEM using the Cavalli et al. (2008)
+    Surface roughness weight derived from DEM using the Cavalli and Marchi (2008)
     residual-roughness workflow.
 
     .. math::
@@ -205,8 +205,10 @@ class SurfaceRoughnessWeight:
 
     References
     ----------
-    Cavalli, M. et al. (2008). A new approach to geomorphometric assessment
-        of spatial sediment connectivity in small Alpine catchments.
+    Cavalli, M. and Marchi, L. (2008). Characterisation of the surface
+        morphology of an alpine alluvial fan using airborne LiDAR.
+        Natural Hazards and Earth System Sciences, 8, 323-333.
+        https://doi.org/10.5194/nhess-8-323-2008
     """
 
     name = "roughness"

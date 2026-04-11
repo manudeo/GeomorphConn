@@ -28,7 +28,13 @@ The toolbox provides four model tools:
 	Computes rainfall/NDVI weighting first, then runs target-mode IC.
 - SurfaceRoughness:
 	Computes DEM-based surface roughness index used in roughness-driven weighting workflows,
-	following the Cavalli et al. (2008) roughness concept.
+	following Cavalli and Marchi (2008).
+
+Roughness reference:
+
+- Cavalli, M. and Marchi, L. (2008). Characterisation of the surface morphology
+	of an alpine alluvial fan using airborne LiDAR. *Natural Hazards and Earth
+	System Sciences*, 8, 323-333. https://doi.org/10.5194/nhess-8-323-2008
 
 ## Requirements
 
