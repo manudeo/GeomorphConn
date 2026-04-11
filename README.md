@@ -8,7 +8,7 @@
 **GeomorphConn** is an open-source Python package that implements the
 [Index of Connectivity (IC)](https://doi.org/10.1016/j.geomorph.2012.05.010)
 (Cavalli et al., 2013) as a [Landlab](https://landlab.readthedocs.io)-type workflow,
-extended with NDVI- and rainfall-based hydrological weights (Dubey et al., submitted). It also provides a
+extended with NDVI- and rainfall-based hydrological weights (Dubey et al., in prep.). It also provides a
 Google Earth Engine (GEE) data-fetching module so that all required inputs — DEM,
 NDVI, and rainfall — can be retrieved directly from the cloud for any catchment on
 Earth.
@@ -402,8 +402,7 @@ And the original IC software (SedInConnect):
 
 And the NDVI/rainfall hydrological-weight extension used in GeomorphConn:
 
-> Dubey, A., Singh, M., & Jain, V. (submitted). Hydrologically weighted
-> extension of the Index of Connectivity using NDVI and rainfall forcings.
+> Dubey, A., Singh, M., & Jain, V. (in prep.). Understanding Sediment Dynamics in Large River Basins with the Effect of Hydro-sedimentological Connectivity Index.
 
 And a related SCI-based connectivity approach:
 
