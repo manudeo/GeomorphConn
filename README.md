@@ -183,9 +183,12 @@ Use this quick reference to interpret the main checkbox/toggle options.
 - `Fill sinks before routing (ArcGIS-like)` (GUI): explicitly fill depressions before routing (`Fill -> FlowDirection -> FlowAccumulation`) to better match ArcGIS workflows.
 - `Reference grid` (GUI/CLI): choose which raster grid (`dem`, `ndvi`, `rainfall`, or `weight`) is used as the alignment target.
 - `w_min` / `w_max` (GUI): lower and upper clamps for weight scaling; GUI now accepts values to 5 decimal places.
-- `IC mode` (GUI): choose `Outlet` for standard basin-outlet IC or `Target` to route IC toward a supplied vector target.
-- `Target vector path` (GUI): local vector file path for target mode. A `.shp` path is sufficient when its `.dbf`, `.shx`, and other sidecar files are present in the same folder.
-- `Target vector` (GUI upload) / `--target-vector` (CLI): use a vector feature instead of the basin outlet as the routing target. Any geopandas-readable format is supported in CLI; GUI supports direct local vector paths plus uploaded GeoJSON/GPKG and zipped shapefiles.
+- `IC mode` (GUI): choose `Outlet` for standard basin-outlet IC or `Target` to route IC toward a target defined by either flow accumulation threshold or a vector file.
+- **Target definition method (GUI, Target mode only):** choose one of:
+  - **Flow accumulation threshold:** auto-detect stream/outlet cells based on upstream cell count using the selected flow director algorithm (D8, DINF, or MFD). Typical values: D8=500–2000, DINF/MFD=200–1000 (due to distributed flow).
+  - **Vector file:** supply a vector target (shapefile, GeoJSON, GeoPackage) via local path or upload. Any geopandas-readable format is supported in CLI; GUI supports direct local vector paths plus uploaded GeoJSON/GPKG and zipped shapefiles.
+- `Target vector path` (GUI, vector file mode): local vector file path for target. A `.shp` path is sufficient when its `.dbf`, `.shx`, and other sidecar files are present in the same folder.
+- `Target vector` (GUI upload, vector file mode) / `--target-vector` (CLI): supply a vector target via file upload instead of a local path.
 - `Target buffer` (GUI) / `--target-buffer` (CLI): optional pre-rasterization buffer; if left at `0`, line targets are automatically buffered by about half a cell.
 - `Target rasterization: all touched` (GUI) / `--all-touched` (CLI): include any raster cell touched by the target geometry.
 - Target masking behavior: in target mode, pixels that belong to the target feature are written as `NaN` in IC outputs (treated as terminal mask cells).

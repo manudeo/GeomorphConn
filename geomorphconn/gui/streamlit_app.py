@@ -538,54 +538,72 @@ def main():
     stream_threshold = None
     if target_mode == "Target":
         st.subheader("Target settings")
-        stream_threshold = st.number_input(
-            "Stream generation threshold (cells)",
-            min_value=1,
-            value=1000,
-            step=100,
-            help=(
-                "Cells with D8 upstream count >= this threshold are treated as stream/target cells. "
-                "This matches the Borselli ArcGIS channel-mask concept and can be used with or without a vector target."
-            ),
+        
+        # Exclusive choice: flow accumulation threshold vs. vector file
+        target_input_mode = st.radio(
+            "Target definition method",
+            ["Flow accumulation threshold", "Vector file"],
+            index=0,
+            help="Choose how to define target/outlet cells: auto-detect from flow accumulation, or supply a vector feature.",
         )
-        if "target_vector_path_value" not in st.session_state:
-            st.session_state["target_vector_path_value"] = ""
-
-        tcol1, tcol2 = st.columns([3, 1])
-        with tcol1:
-            target_vector_path = st.text_input(
-                "Target vector path",
-                value=st.session_state["target_vector_path_value"],
-                help="Path to a local target vector file. A `.shp` path works directly if its sidecar files are in the same folder.",
+        
+        if target_input_mode == "Flow accumulation threshold":
+            # Flow accumulation threshold mode
+            st.write(
+                f"**Flow direction algorithm:** {flow_director}  "
+                f"(affects upstream count computation)"
             )
-            st.session_state["target_vector_path_value"] = target_vector_path
-        with tcol2:
-            st.write("")
-            if st.button("Browse vector...", help="Pick a local target vector file"):
-                picked = _browse_file_native(
-                    "Select target vector",
-                    [
-                        ("Vector files", "*.shp *.zip *.geojson *.json *.gpkg"),
-                        ("Shapefile", "*.shp"),
-                        ("Zip archive", "*.zip"),
-                        ("GeoJSON", "*.geojson *.json"),
-                        ("GeoPackage", "*.gpkg"),
-                        ("All files", "*.*"),
-                    ],
-                    initial_dir=str(Path(target_vector_path).parent)
-                    if target_vector_path.strip()
-                    else str(Path.cwd()),
-                )
-                if picked:
-                    st.session_state["target_vector_path_value"] = picked
-                    st.rerun()
+            stream_threshold = st.number_input(
+                "Stream generation threshold (upstream cells)",
+                min_value=1,
+                value=1000,
+                step=100,
+                help=(
+                    f"Cells with {flow_director} upstream cell count >= this threshold are treated as stream/target cells. "
+                    f"This matches the Borselli ArcGIS channel-mask concept. "
+                    f"Typical values: D8=500-2000, DINF/MFD=200-1000 (due to distributed flow)."
+                ),
+            )
+        else:
+            # Vector file mode
+            if "target_vector_path_value" not in st.session_state:
+                st.session_state["target_vector_path_value"] = ""
 
-        target_files = st.file_uploader(
-            "Or upload target vector (GeoJSON/GPKG or zipped shapefile)",
-            type=["geojson", "json", "gpkg", "zip", "shp", "dbf", "shx", "prj", "cpg"],
-            accept_multiple_files=True,
-            help="Alternative to using a local path. A single `.shp` upload is usually not enough by itself; use the path field for local shapefiles, upload all sidecar files together, or upload a zipped shapefile.",
-        )
+            tcol1, tcol2 = st.columns([3, 1])
+            with tcol1:
+                target_vector_path = st.text_input(
+                    "Target vector path",
+                    value=st.session_state["target_vector_path_value"],
+                    help="Path to a local target vector file. A `.shp` path works directly if its sidecar files are in the same folder.",
+                )
+                st.session_state["target_vector_path_value"] = target_vector_path
+            with tcol2:
+                st.write("")
+                if st.button("Browse vector...", help="Pick a local target vector file"):
+                    picked = _browse_file_native(
+                        "Select target vector",
+                        [
+                            ("Vector files", "*.shp *.zip *.geojson *.json *.gpkg"),
+                            ("Shapefile", "*.shp"),
+                            ("Zip archive", "*.zip"),
+                            ("GeoJSON", "*.geojson *.json"),
+                            ("GeoPackage", "*.gpkg"),
+                            ("All files", "*.*"),
+                        ],
+                        initial_dir=str(Path(target_vector_path).parent)
+                        if target_vector_path.strip()
+                        else str(Path.cwd()),
+                    )
+                    if picked:
+                        st.session_state["target_vector_path_value"] = picked
+                        st.rerun()
+
+            target_files = st.file_uploader(
+                "Or upload target vector (GeoJSON/GPKG or zipped shapefile)",
+                type=["geojson", "json", "gpkg", "zip", "shp", "dbf", "shx", "prj", "cpg"],
+                accept_multiple_files=True,
+                help="Alternative to using a local path. A single `.shp` upload is usually not enough by itself; use the path field for local shapefiles, upload all sidecar files together, or upload a zipped shapefile.",
+            )
 
     st.subheader("Output settings")
     if "output_dir_value" not in st.session_state:
