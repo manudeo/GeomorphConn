@@ -222,6 +222,7 @@ def _write_cli_run_params_txt(
     lines.append(f"Rainfall          : {args.rainfall or 'N/A'}")
     lines.append(f"Weight raster     : {args.weight_raster or 'N/A'}")
     lines.append(f"Main basin mask   : {args.main_basin_mask or 'N/A'}")
+    lines.append(f"Main basin only   : {args.main_basin_only}")
     lines.append("")
     lines.append("--- Parameters ---")
     lines.append(f"Flow director     : {args.flow_director}")
@@ -472,6 +473,7 @@ def _run_command(args) -> int:
             weight=np.flipud(user_weight).ravel(),
             target_nodes=target_nodes,
             analysis_mask_nodes=analysis_mask_nodes,
+            main_basin_only=args.main_basin_only,
             stream_threshold=args.stream_threshold,
             depression_finder=None if args.depression_finder == "none" else args.depression_finder,
             w_min=args.w_min,
@@ -506,6 +508,7 @@ def _run_command(args) -> int:
             weight=weight_builder,
             target_nodes=target_nodes,
             analysis_mask_nodes=analysis_mask_nodes,
+            main_basin_only=args.main_basin_only,
             stream_threshold=args.stream_threshold,
             depression_finder=None if args.depression_finder == "none" else args.depression_finder,
             w_min=args.w_min,
@@ -725,6 +728,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Optional basin-mask raster. Cells > 0 are treated as the analysis domain; "
             "stream-threshold targets are restricted to this mask and outputs outside are NoData."
+        ),
+    )
+    run_p.add_argument(
+        "--main-basin-only",
+        action="store_true",
+        help=(
+            "Restrict analysis to the dominant outlet-derived basin (largest D8 outlet basin). "
+            "Useful in target mode to exclude neighbouring catchments without supplying a mask raster."
         ),
     )
     run_p.add_argument(

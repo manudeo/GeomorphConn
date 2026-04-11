@@ -321,6 +321,11 @@ class ConnectivityIndex(Component):
         If provided, stream-threshold targets are restricted to these nodes,
         supplied *target_nodes* are intersected with this mask, and all output
         layers are set to NaN outside the mask.
+    main_basin_only : bool, optional
+        If *True*, derive an outlet-based mask from D8 routing and keep only
+        nodes draining to the dominant outlet (largest drainage area among D8
+        outlets). Useful in target mode to exclude neighbouring catchments
+        without supplying an external mask raster.
     stream_threshold : int or None, optional
         Automatically define the channel network from D8 flow accumulation.
         Every node whose upstream cell count >= *stream_threshold* is treated
@@ -485,6 +490,7 @@ class ConnectivityIndex(Component):
         slope=None,
         target_nodes=None,
         analysis_mask_nodes=None,
+        main_basin_only: bool = False,
         stream_threshold=None,
         fill_sinks: bool = False,
         depression_finder: str | None = None,
@@ -511,6 +517,7 @@ class ConnectivityIndex(Component):
         # Stage 0 fills sinks (if enabled), then Stage 1 applies depression_finder.
         self._depression_finder = depression_finder
         self._stream_threshold = int(stream_threshold) if stream_threshold is not None else None
+        self._main_basin_only = bool(main_basin_only)
         n = grid.number_of_nodes
 
         # Optional user-provided slope override.
@@ -698,8 +705,9 @@ class ConnectivityIndex(Component):
             ACCfinal[eff_targets] = np.nan
 
         # Optional analysis-domain mask (e.g., keep only main basin in target mode).
-        if self._analysis_mask_bool is not None:
-            outside = ~self._analysis_mask_bool
+        analysis_mask_bool = routing.get("analysis_mask_bool")
+        if analysis_mask_bool is not None:
+            outside = ~analysis_mask_bool
             IC[outside] = np.nan
             Dup[outside] = np.nan
             Ddn[outside] = np.nan
@@ -799,6 +807,47 @@ class ConnectivityIndex(Component):
         slope_tan = np.abs(g_work.at_node["topographic__steepest_slope"].copy().ravel())
         d8_order  = g_work.at_node["flow__upstream_node_order"].copy().astype(np.int64)
 
+        def _dominant_outlet_mask(receivers: np.ndarray, drainage_area: np.ndarray) -> np.ndarray | None:
+            n_nodes = receivers.size
+            nodes = np.arange(n_nodes, dtype=np.int64)
+            outlets = nodes[receivers == nodes]
+            if outlets.size == 0:
+                return None
+            main_outlet = outlets[np.argmax(drainage_area[outlets])]
+
+            visited = np.full(n_nodes, -1, dtype=np.int64)
+
+            def _terminal(start: int) -> int:
+                trail = []
+                cur = int(start)
+                while True:
+                    nxt = int(receivers[cur])
+                    trail.append(cur)
+                    if nxt == cur:
+                        term = cur
+                        break
+                    if visited[cur] >= 0:
+                        term = int(visited[cur])
+                        break
+                    cur = nxt
+                for t in trail:
+                    visited[t] = term
+                return term
+
+            for i in range(n_nodes):
+                if visited[i] < 0:
+                    _terminal(i)
+            return visited == int(main_outlet)
+
+        analysis_mask_bool = self._analysis_mask_bool.copy() if self._analysis_mask_bool is not None else None
+        if self._main_basin_only:
+            basin_mask = _dominant_outlet_mask(d8_recv, g_work.at_node["drainage_area"])
+            if basin_mask is None or not np.any(basin_mask):
+                raise ValueError("Could not derive a valid outlet-based main basin mask")
+            analysis_mask_bool = basin_mask if analysis_mask_bool is None else (analysis_mask_bool & basin_mask)
+            if not np.any(analysis_mask_bool):
+                raise ValueError("Analysis mask is empty after intersecting with outlet-based main basin")
+
         # Resolve effective target nodes, starting from vector targets.
         eff_targets = self._target_nodes  # may be None
 
@@ -806,8 +855,8 @@ class ConnectivityIndex(Component):
             """Merge vector targets with flow-accumulation-derived stream targets."""
             if base_targets is not None:
                 base_targets = np.asarray(base_targets, dtype=np.int64)
-                if self._analysis_mask_bool is not None:
-                    base_targets = base_targets[self._analysis_mask_bool[base_targets]]
+                if analysis_mask_bool is not None:
+                    base_targets = base_targets[analysis_mask_bool[base_targets]]
                 if base_targets.size == 0:
                     base_targets = None
             if self._stream_threshold is None:
@@ -815,8 +864,8 @@ class ConnectivityIndex(Component):
             cell_area = float(grid.dx) * float(grid.dy)
             cell_count = drainage_area / cell_area
             stream_nodes = np.where(cell_count >= self._stream_threshold)[0].astype(np.int64)
-            if self._analysis_mask_bool is not None:
-                stream_nodes = stream_nodes[self._analysis_mask_bool[stream_nodes]]
+            if analysis_mask_bool is not None:
+                stream_nodes = stream_nodes[analysis_mask_bool[stream_nodes]]
             if base_targets is not None:
                 return np.unique(np.concatenate([base_targets, stream_nodes]))
             if len(stream_nodes) > 0:
@@ -842,6 +891,7 @@ class ConnectivityIndex(Component):
                 "d8_node_order" : d8_order,
                 "drainage_area" : g_work.at_node["drainage_area"].copy(),
                 "effective_target_nodes": eff_targets,
+                "analysis_mask_bool": analysis_mask_bool,
             }
 
         # Stage 2: primary director on a fresh grid with Stage-1 elevation.
@@ -880,6 +930,7 @@ class ConnectivityIndex(Component):
             "d8_node_order" : d8_order,
             "drainage_area" : da2,
             "effective_target_nodes": eff_targets,
+            "analysis_mask_bool": analysis_mask_bool,
         }
 
     # Weights

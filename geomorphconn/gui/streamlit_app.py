@@ -88,6 +88,7 @@ def _build_ic_cache_key(
     w_max,
     target_nodes,
     analysis_mask_nodes,
+    main_basin_only,
     stream_threshold,
     fill_sinks,
     fill_method,
@@ -118,6 +119,7 @@ def _build_ic_cache_key(
         f"{float(w_max):.12g}",
         target_key,
         analysis_mask_key,
+        str(bool(main_basin_only)),
         str(stream_threshold),
         str(bool(fill_sinks)),
         str(fill_method),
@@ -142,6 +144,7 @@ def _compute_ic(
     user_weight,
     target_nodes,
     analysis_mask_nodes,
+    main_basin_only,
     stream_threshold,
     fill_sinks,
     depression_finder,
@@ -162,6 +165,7 @@ def _compute_ic(
             "weight": np.flipud(user_weight).ravel(),
             "target_nodes": target_nodes,
             "analysis_mask_nodes": analysis_mask_nodes,
+            "main_basin_only": main_basin_only,
             "stream_threshold": stream_threshold,
             "fill_sinks": fill_sinks,
             "depression_finder": depression_finder,
@@ -194,6 +198,7 @@ def _compute_ic(
             "weight": wb,
             "target_nodes": target_nodes,
             "analysis_mask_nodes": analysis_mask_nodes,
+            "main_basin_only": main_basin_only,
             "stream_threshold": stream_threshold,
             "fill_sinks": fill_sinks,
             "depression_finder": depression_finder,
@@ -211,7 +216,7 @@ def _compute_ic(
     }
 
 
-def _align_uploaded_to_reference(dem_file, ndvi_file, rainfall_file, weight_file, mask_file, reference_grid: str):
+def _align_uploaded_to_reference(dem_file, ndvi_file, rainfall_file, weight_file, reference_grid: str):
     try:
         import rioxarray as rxr
     except ImportError as exc:
@@ -228,7 +233,6 @@ def _align_uploaded_to_reference(dem_file, ndvi_file, rainfall_file, weight_file
         p_ndvi = Path(tmpdir) / "ndvi.tif"
         p_rf = Path(tmpdir) / "rainfall.tif"
         p_w = Path(tmpdir) / "weight.tif"
-        p_mask = Path(tmpdir) / "mask.tif"
 
         p_dem.write_bytes(dem_file.getvalue())
         if ndvi_file is not None:
@@ -237,8 +241,6 @@ def _align_uploaded_to_reference(dem_file, ndvi_file, rainfall_file, weight_file
             p_rf.write_bytes(rainfall_file.getvalue())
         if weight_file is not None:
             p_w.write_bytes(weight_file.getvalue())
-        if mask_file is not None:
-            p_mask.write_bytes(mask_file.getvalue())
 
         ds_map: dict[str, Any] = {}
         aligned: dict[str, Any] = {}
@@ -251,8 +253,6 @@ def _align_uploaded_to_reference(dem_file, ndvi_file, rainfall_file, weight_file
                 ds_map["rainfall"] = _open_da(p_rf)
             if weight_file is not None:
                 ds_map["weight"] = _open_da(p_w)
-            if mask_file is not None:
-                ds_map["mask"] = _open_da(p_mask)
 
             if reference_grid not in ds_map:
                 raise ValueError(
@@ -370,7 +370,7 @@ def _write_gui_run_summary(
     ndvi_file,
     rainfall_file,
     weight_file,
-    main_basin_mask_file,
+    main_basin_only: bool,
     flow_director: str,
     depression_finder,
     fill_sinks: bool,
@@ -402,7 +402,7 @@ def _write_gui_run_summary(
     lines.append(f"NDVI              : {ndvi_file.name if ndvi_file else 'N/A'}")
     lines.append(f"Rainfall          : {rainfall_file.name if rainfall_file else 'N/A'}")
     lines.append(f"Weight raster     : {weight_file.name if weight_file else 'N/A'}")
-    lines.append(f"Main basin mask   : {main_basin_mask_file.name if main_basin_mask_file else 'N/A'}")
+    lines.append(f"Main basin only   : {main_basin_only}")
     lines.append("")
     lines.append("--- Parameters ---")
     lines.append(f"Flow director     : {flow_director}")
@@ -844,12 +844,12 @@ def main():
         if use_supplied_weight
         else None
     )
-    main_basin_mask_file = st.file_uploader(
-        "Main basin mask GeoTIFF (optional)",
-        type=["tif", "tiff"],
+    main_basin_only = st.checkbox(
+        "Mask out neighbouring basins (dominant outlet only)",
+        value=False,
         help=(
-            "Optional raster mask for Option 5 workflow. Cells > 0 define the main basin domain; "
-            "stream-threshold targets are restricted to this area and outputs outside are set to NoData."
+            "If enabled, GeomorphConn automatically derives the dominant outlet basin from the DEM and masks out "
+            "cells that do not drain to that outlet. Useful in Target mode to exclude surrounding small catchments."
         ),
     )
 
@@ -1081,14 +1081,12 @@ def main():
                     ndvi_file,
                     rainfall_file,
                     weight_file,
-                    main_basin_mask_file,
                     reference_grid,
                 )
                 dem = arrays["dem"]
                 ndvi = arrays.get("ndvi")
                 rainfall = arrays.get("rainfall")
                 user_weight = arrays.get("weight")
-                main_basin_mask = arrays.get("mask")
                 xy_spacing = abs(float(ref_profile["transform"].a))
                 save_profile = {
                     "transform": ref_profile["transform"],
@@ -1105,15 +1103,6 @@ def main():
                     else None
                 )
                 user_weight = _read_uploaded_raster(weight_file)[0] if weight_file is not None else None
-                main_basin_mask = (
-                    _read_uploaded_raster(main_basin_mask_file)[0]
-                    if main_basin_mask_file is not None
-                    else None
-                )
-                if main_basin_mask is not None and dem.shape != main_basin_mask.shape:
-                    raise ValueError(
-                        "DEM and main basin mask must have identical shape when Auto-align rasters is disabled."
-                    )
                 xy_spacing = abs(float(dem_profile["transform"].a))
                 save_profile = {
                     "transform": dem_profile["transform"],
@@ -1136,7 +1125,6 @@ def main():
             if coarsen_factor > 1:
                 status.info(f"Coarsening rasters {coarsen_factor}\u00d7 ...")
                 raster_dict = {"dem": dem, "ndvi": ndvi, "rainfall": rainfall, "weight": user_weight}
-                raster_dict["mask"] = main_basin_mask
                 coarsened_dict, xy_spacing, save_profile = _coarsen_rasters(
                     raster_dict, coarsen_factor, xy_spacing, save_profile
                 )
@@ -1144,14 +1132,8 @@ def main():
                 ndvi = coarsened_dict["ndvi"]
                 rainfall = coarsened_dict["rainfall"]
                 user_weight = coarsened_dict["weight"]
-                main_basin_mask = coarsened_dict["mask"]
 
             analysis_mask_nodes = None
-            if main_basin_mask is not None:
-                mask_bool = np.isfinite(main_basin_mask) & (main_basin_mask > 0.5)
-                if not np.any(mask_bool):
-                    raise ValueError("Main basin mask contains no valid (>0.5) cells.")
-                analysis_mask_nodes = np.where(np.flipud(mask_bool).ravel())[0].astype(np.int64)
 
             target_nodes = None
             if target_mode == "Target" and target_input_mode == "Vector file":
@@ -1194,6 +1176,7 @@ def main():
                 float(w_max),
                 target_nodes,
                 analysis_mask_nodes,
+                main_basin_only,
                 int(stream_threshold) if stream_threshold is not None else None,
                 fill_sinks,
                 fill_method,
@@ -1221,6 +1204,7 @@ def main():
                     user_weight,
                     target_nodes,
                     analysis_mask_nodes,
+                    main_basin_only,
                     int(stream_threshold) if stream_threshold is not None else None,
                     fill_sinks,
                     depression_finder,
@@ -1289,7 +1273,7 @@ def main():
                     ndvi_file=ndvi_file,
                     rainfall_file=rainfall_file,
                     weight_file=weight_file,
-                    main_basin_mask_file=main_basin_mask_file,
+                    main_basin_only=main_basin_only,
                     flow_director=flow_director,
                     depression_finder=depression_finder,
                     fill_sinks=fill_sinks,
