@@ -164,6 +164,93 @@ def test_cli_shape_mismatch_no_reproject_fails(tmp_path):
     assert rc == 2
 
 
+def test_cli_main_basin_mask_shape_mismatch_no_reproject_fails(tmp_path):
+    dem = np.ones((5, 5), dtype=np.float64)
+    ndvi = np.ones((5, 5), dtype=np.float64)
+    rainfall = np.ones((5, 5), dtype=np.float64)
+    mask = np.ones((4, 5), dtype=np.float64)
+
+    dem_p = tmp_path / "dem.tif"
+    ndvi_p = tmp_path / "ndvi.tif"
+    rf_p = tmp_path / "rain.tif"
+    mask_p = tmp_path / "mask.tif"
+    _write_tif(dem_p, dem)
+    _write_tif(ndvi_p, ndvi)
+    _write_tif(rf_p, rainfall)
+    _write_tif(mask_p, mask)
+
+    rc = main(
+        [
+            "run",
+            "--dem",
+            str(dem_p),
+            "--ndvi",
+            str(ndvi_p),
+            "--rainfall",
+            str(rf_p),
+            "--main-basin-mask",
+            str(mask_p),
+            "--no-auto-reproject",
+        ]
+    )
+    assert rc == 2
+
+
+def test_cli_main_basin_mask_runs_and_writes_masked_output(tmp_path):
+    dem = np.array(
+        [
+            [10, 11, 12, 13, 14],
+            [9, 10, 11, 12, 13],
+            [8, 9, 10, 11, 12],
+            [7, 8, 9, 10, 11],
+            [6, 7, 8, 9, 10],
+        ],
+        dtype=np.float64,
+    )
+    ndvi = np.full_like(dem, 0.4)
+    rainfall = np.full_like(dem, 800.0)
+    mask = np.zeros_like(dem)
+    mask[:, :3] = 1.0
+
+    dem_p = tmp_path / "dem.tif"
+    ndvi_p = tmp_path / "ndvi.tif"
+    rf_p = tmp_path / "rain.tif"
+    mask_p = tmp_path / "mask.tif"
+    _write_tif(dem_p, dem)
+    _write_tif(ndvi_p, ndvi)
+    _write_tif(rf_p, rainfall)
+    _write_tif(mask_p, mask)
+
+    out_dir = tmp_path / "out_mask"
+    rc = main(
+        [
+            "run",
+            "--dem",
+            str(dem_p),
+            "--ndvi",
+            str(ndvi_p),
+            "--rainfall",
+            str(rf_p),
+            "--main-basin-mask",
+            str(mask_p),
+            "--outputs",
+            "IC",
+            "--out-dir",
+            str(out_dir),
+            "--prefix",
+            "masked_",
+        ]
+    )
+
+    assert rc == 0
+    ic_path = out_dir / "masked_IC.tif"
+    assert ic_path.exists()
+    with rasterio.open(ic_path) as src:
+        data = src.read(1)
+        nodata = src.nodata
+    assert np.any(data == nodata)
+
+
 def test_cli_welcome_subcommand_returns_zero():
     rc = main(["welcome"])
     assert rc == 0

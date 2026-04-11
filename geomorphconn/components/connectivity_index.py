@@ -316,6 +316,11 @@ class ConnectivityIndex(Component):
         Node IDs of target features (river/lake).  If *None*, IC is
         computed toward the natural basin outlet.  Provide via
         :func:`~GeomorphConn.utils.rasterize_targets`.
+    analysis_mask_nodes : array_like of int, optional
+        Node IDs that define the analysis domain (e.g., main watershed mask).
+        If provided, stream-threshold targets are restricted to these nodes,
+        supplied *target_nodes* are intersected with this mask, and all output
+        layers are set to NaN outside the mask.
     stream_threshold : int or None, optional
         Automatically define the channel network from D8 flow accumulation.
         Every node whose upstream cell count >= *stream_threshold* is treated
@@ -479,6 +484,7 @@ class ConnectivityIndex(Component):
         rainfall=None,
         slope=None,
         target_nodes=None,
+        analysis_mask_nodes=None,
         stream_threshold=None,
         fill_sinks: bool = False,
         depression_finder: str | None = None,
@@ -518,6 +524,21 @@ class ConnectivityIndex(Component):
             np.asarray(target_nodes, dtype=np.int64)
             if target_nodes is not None else None
         )
+        self._analysis_mask_nodes = (
+            np.asarray(analysis_mask_nodes, dtype=np.int64)
+            if analysis_mask_nodes is not None
+            else None
+        )
+        if self._analysis_mask_nodes is not None:
+            if self._analysis_mask_nodes.size == 0:
+                raise ValueError("'analysis_mask_nodes' must not be empty when provided")
+            if np.any(self._analysis_mask_nodes < 0) or np.any(self._analysis_mask_nodes >= n):
+                raise ValueError("'analysis_mask_nodes' contains node IDs outside valid range")
+            self._analysis_mask_nodes = np.unique(self._analysis_mask_nodes)
+            self._analysis_mask_bool = np.zeros(n, dtype=bool)
+            self._analysis_mask_bool[self._analysis_mask_nodes] = True
+        else:
+            self._analysis_mask_bool = None
 
         # Weight modes: builder, precomputed array, or ndvi/rainfall.
         if weight is not None:
@@ -676,6 +697,18 @@ class ConnectivityIndex(Component):
             Smean[eff_targets] = np.nan
             ACCfinal[eff_targets] = np.nan
 
+        # Optional analysis-domain mask (e.g., keep only main basin in target mode).
+        if self._analysis_mask_bool is not None:
+            outside = ~self._analysis_mask_bool
+            IC[outside] = np.nan
+            Dup[outside] = np.nan
+            Ddn[outside] = np.nan
+            W[outside] = np.nan
+            S[outside] = np.nan
+            Wmean[outside] = np.nan
+            Smean[outside] = np.nan
+            ACCfinal[outside] = np.nan
+
         # 7) Write fields
         g = self._grid
         g.at_node["connectivity_index__IC"][:]    = IC
@@ -771,11 +804,19 @@ class ConnectivityIndex(Component):
 
         def _merge_stream_targets(base_targets, drainage_area):
             """Merge vector targets with flow-accumulation-derived stream targets."""
+            if base_targets is not None:
+                base_targets = np.asarray(base_targets, dtype=np.int64)
+                if self._analysis_mask_bool is not None:
+                    base_targets = base_targets[self._analysis_mask_bool[base_targets]]
+                if base_targets.size == 0:
+                    base_targets = None
             if self._stream_threshold is None:
                 return base_targets
             cell_area = float(grid.dx) * float(grid.dy)
             cell_count = drainage_area / cell_area
             stream_nodes = np.where(cell_count >= self._stream_threshold)[0].astype(np.int64)
+            if self._analysis_mask_bool is not None:
+                stream_nodes = stream_nodes[self._analysis_mask_bool[stream_nodes]]
             if base_targets is not None:
                 return np.unique(np.concatenate([base_targets, stream_nodes]))
             if len(stream_nodes) > 0:

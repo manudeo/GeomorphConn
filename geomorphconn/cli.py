@@ -66,6 +66,7 @@ def _load_aligned_rasters(
     ndvi_path: Path | None,
     rainfall_path: Path | None,
     weight_path: Path | None,
+    mask_path: Path | None,
     ref_grid: str,
 ):
     try:
@@ -90,6 +91,8 @@ def _load_aligned_rasters(
             ds_map["rainfall"] = _open_da(rainfall_path)
         if weight_path is not None:
             ds_map["weight"] = _open_da(weight_path)
+        if mask_path is not None:
+            ds_map["mask"] = _open_da(mask_path)
 
         if ref_grid not in ds_map:
             raise ValueError(
@@ -216,6 +219,7 @@ def _write_cli_run_params_txt(
     lines.append(f"NDVI              : {args.ndvi or 'N/A'}")
     lines.append(f"Rainfall          : {args.rainfall or 'N/A'}")
     lines.append(f"Weight raster     : {args.weight_raster or 'N/A'}")
+    lines.append(f"Main basin mask   : {args.main_basin_mask or 'N/A'}")
     lines.append("")
     lines.append("--- Parameters ---")
     lines.append(f"Flow director     : {args.flow_director}")
@@ -310,13 +314,19 @@ def _run_command(args) -> int:
     ndvi_path = Path(args.ndvi) if args.ndvi else None
     rainfall_path = Path(args.rainfall) if args.rainfall else None
     weight_path = Path(args.weight_raster) if args.weight_raster else None
+    mask_path = Path(args.main_basin_mask) if args.main_basin_mask else None
 
     _show_progress(1, total_steps, "Loading/preprocessing rasters")
 
     if args.auto_reproject:
         try:
             arrays, dem_profile, dem_transform, dem_crs = _load_aligned_rasters(
-                dem_path, ndvi_path, rainfall_path, weight_path, args.reference_grid
+                dem_path,
+                ndvi_path,
+                rainfall_path,
+                weight_path,
+                mask_path,
+                args.reference_grid,
             )
         except Exception as exc:
             print(f"Error during raster alignment: {exc}", file=sys.stderr)
@@ -325,11 +335,13 @@ def _run_command(args) -> int:
         ndvi = arrays.get("ndvi")
         rainfall = arrays.get("rainfall")
         user_weight = arrays.get("weight")
+        mask_arr = arrays.get("mask")
     else:
         dem, dem_profile, dem_transform, dem_crs = _read_raster(dem_path)
         ndvi = None
         rainfall = None
         user_weight = None
+        mask_arr = None
         if need_ndvi:
             if ndvi_path is None:
                 print("Error: --ndvi is required when 'ndvi' factor is selected.", file=sys.stderr)
@@ -366,6 +378,14 @@ def _run_command(args) -> int:
                     file=sys.stderr,
                 )
                 return 2
+        if mask_path is not None:
+            mask_arr, _, _, _ = _read_raster(mask_path)
+            if dem.shape != mask_arr.shape:
+                print(
+                    "Error: DEM and main basin mask must have identical shape when --no-auto-reproject is used.",
+                    file=sys.stderr,
+                )
+                return 2
 
     dx = float(abs(dem_transform.a))
     dy = float(abs(dem_transform.e))
@@ -374,7 +394,13 @@ def _run_command(args) -> int:
         return 2
 
     if args.dem_coarsen_factor > 1:
-        arr_dict = {"dem": dem, "ndvi": ndvi, "rainfall": rainfall, "weight": user_weight}
+        arr_dict = {
+            "dem": dem,
+            "ndvi": ndvi,
+            "rainfall": rainfall,
+            "weight": user_weight,
+            "mask": mask_arr,
+        }
         try:
             arr_dict, dem_profile = _coarsen_rasters(arr_dict, int(args.dem_coarsen_factor), dem_profile)
         except ValueError as exc:
@@ -384,11 +410,20 @@ def _run_command(args) -> int:
         ndvi = arr_dict["ndvi"]
         rainfall = arr_dict["rainfall"]
         user_weight = arr_dict["weight"]
+        mask_arr = arr_dict["mask"]
         dem_transform = dem_profile["transform"]
         dx = float(abs(dem_transform.a))
 
     grid = RasterModelGrid(dem.shape, xy_spacing=dx)
     grid.add_field("topographic__elevation", np.flipud(dem).ravel(), at="node")
+
+    analysis_mask_nodes = None
+    if mask_arr is not None:
+        mask_bool = np.isfinite(mask_arr) & (mask_arr > 0.5)
+        if not np.any(mask_bool):
+            print("Error: main basin mask contains no valid (>0.5) cells.", file=sys.stderr)
+            return 2
+        analysis_mask_nodes = np.where(np.flipud(mask_bool).ravel())[0].astype(np.int64)
 
     target_nodes = None
     if args.target_vector:
@@ -434,6 +469,7 @@ def _run_command(args) -> int:
             flow_director=args.flow_director,
             weight=np.flipud(user_weight).ravel(),
             target_nodes=target_nodes,
+            analysis_mask_nodes=analysis_mask_nodes,
             stream_threshold=args.stream_threshold,
             depression_finder=None if args.depression_finder == "none" else args.depression_finder,
             w_min=args.w_min,
@@ -467,6 +503,7 @@ def _run_command(args) -> int:
             flow_director=args.flow_director,
             weight=weight_builder,
             target_nodes=target_nodes,
+            analysis_mask_nodes=analysis_mask_nodes,
             stream_threshold=args.stream_threshold,
             depression_finder=None if args.depression_finder == "none" else args.depression_finder,
             w_min=args.w_min,
@@ -680,6 +717,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reference raster grid for automatic alignment",
     )
     run_p.add_argument("--target-vector", default=None, help="Optional target vector path")
+    run_p.add_argument(
+        "--main-basin-mask",
+        default=None,
+        help=(
+            "Optional basin-mask raster. Cells > 0 are treated as the analysis domain; "
+            "stream-threshold targets are restricted to this mask and outputs outside are NoData."
+        ),
+    )
     run_p.add_argument(
         "--target-buffer",
         type=float,

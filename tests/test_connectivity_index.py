@@ -297,6 +297,38 @@ class TestTargetMode:
             equal_nan=True,
         )
 
+    def test_analysis_mask_sets_outside_to_nan(self):
+        nrows, ncols = 20, 20
+        g = _make_grid(nrows=nrows, ncols=ncols)
+
+        mask = np.zeros((nrows, ncols), dtype=bool)
+        mask[4:16, 4:16] = True
+        mask_nodes = np.where(np.flipud(mask).ravel())[0].astype(np.int64)
+
+        ConnectivityIndex(g, analysis_mask_nodes=mask_nodes).run_one_step()
+
+        ic = g.at_node["connectivity_index__IC"]
+        outside_nodes = np.where(~np.flipud(mask).ravel())[0]
+        assert np.all(~np.isfinite(ic[outside_nodes]))
+
+    def test_analysis_mask_filters_stream_threshold_targets(self):
+        nrows, ncols = 30, 30
+        g = _make_grid(nrows=nrows, ncols=ncols)
+
+        left_half = np.zeros((nrows, ncols), dtype=bool)
+        left_half[:, : ncols // 2] = True
+        mask_nodes = np.where(np.flipud(left_half).ravel())[0].astype(np.int64)
+
+        ConnectivityIndex(
+            g,
+            stream_threshold=5,
+            analysis_mask_nodes=mask_nodes,
+        ).run_one_step()
+
+        ic = g.at_node["connectivity_index__IC"]
+        right_half_nodes = np.where(~np.flipud(left_half).ravel())[0]
+        assert np.all(~np.isfinite(ic[right_half_nodes]))
+
 
 class TestDdnKernel:
     def test_terminal_node_ddn_equals_inv_ws(self):
