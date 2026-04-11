@@ -182,7 +182,6 @@ Use this quick reference to interpret the main checkbox/toggle options.
 - `Auto-align rasters` (GUI) / `--auto-reproject` (CLI): align all rasters to a selected reference grid before computation.
 - `Fill sinks before routing (ArcGIS-like)` (GUI): explicitly fill depressions before routing (`Fill -> FlowDirection -> FlowAccumulation`) to better match ArcGIS workflows.
 - `Reference grid` (GUI/CLI): choose which raster grid (`dem`, `ndvi`, `rainfall`, or `weight`) is used as the alignment target.
-- `Invert roughness (TRI)` (GUI) / `--roughness-invert` (CLI): invert TRI effect so rougher terrain reduces W instead of increasing it.
 - `w_min` / `w_max` (GUI): lower and upper clamps for weight scaling; GUI now accepts values to 5 decimal places.
 - `IC mode` (GUI): choose `Outlet` for standard basin-outlet IC or `Target` to route IC toward a supplied vector target.
 - `Target vector path` (GUI): local vector file path for target mode. A `.shp` path is sufficient when its `.dbf`, `.shx`, and other sidecar files are present in the same folder.

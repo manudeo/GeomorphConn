@@ -314,7 +314,7 @@ def _run_command(args) -> int:
             weight_builder.add(NDVIWeight(np.flipud(ndvi).ravel(), w_min=args.w_min))
         if "roughness" in factors:
             weight_builder.add(
-                SurfaceRoughnessWeight(grid, w_min=args.w_min, invert=args.roughness_invert)
+                SurfaceRoughnessWeight(grid, w_min=args.w_min)
             )
 
         ic = ConnectivityIndex(
@@ -429,11 +429,6 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean",
         choices=["mean", "arithmetic_mean", "geometric_mean", "product", "max", "min", "weighted_mean"],
         help="How to combine selected weight factors",
-    )
-    run_p.add_argument(
-        "--roughness-invert",
-        action="store_true",
-        help="Invert TRI roughness scaling (higher TRI -> lower W instead of higher W)",
     )
     run_p.add_argument("--w-min", type=float, default=0.005, help="Lower clamp for W and S")
     run_p.add_argument("--w-max", type=float, default=1.0, help="Upper clamp for W")

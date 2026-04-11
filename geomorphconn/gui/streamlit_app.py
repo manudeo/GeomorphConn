@@ -50,7 +50,6 @@ def _compute_ic(
     xy_spacing,
     weight_factors,
     weight_combine,
-    roughness_invert,
     w_min,
     w_max,
     user_weight,
@@ -91,7 +90,7 @@ def _compute_ic(
         if "ndvi" in weight_factors:
             wb.add(NDVIWeight(np.flipud(ndvi).ravel(), w_min=w_min))
         if "roughness" in weight_factors:
-            wb.add(SurfaceRoughnessWeight(grid, w_min=w_min, invert=roughness_invert))
+            wb.add(SurfaceRoughnessWeight(grid, w_min=w_min))
 
         ci_kwargs = {
             "flow_director": flow_director,
@@ -486,11 +485,6 @@ def main():
             index=0,
             help="Raster grid to which other inputs are aligned before computation. Choose the dataset whose resolution/extent you want to preserve.",
         )
-        roughness_invert = st.checkbox(
-            "Invert roughness (TRI)",
-            value=False,
-            help="Invert TRI-based weighting so rougher terrain decreases W instead of increasing it.",
-        )
         w_min = st.number_input(
             "w_min",
             value=0.005,
@@ -791,7 +785,6 @@ def main():
                 xy_spacing,
                 weight_factors,
                 weight_combine,
-                roughness_invert,
                 float(w_min),
                 float(w_max),
                 user_weight,

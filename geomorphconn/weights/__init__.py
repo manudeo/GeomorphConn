@@ -85,26 +85,23 @@ def preset_rainfall_ndvi(
 
 def preset_roughness_only(
     grid,
-    invert: bool = False,
     w_min: float = 0.005,
 ) -> WeightBuilder:
     """
     DEM-only weight using the Terrain Ruggedness Index (TRI).
 
-    Useful when no satellite-derived data is available.
+    Useful when no satellite-derived data is available. High roughness
+    produces low weight (impedance interpretation).
 
     Parameters
     ----------
     grid : RasterModelGrid
         Landlab grid with ``'topographic__elevation'``.
-    invert : bool, optional
-        If *True*, rough cells → low W (hydraulic-impedance interpretation).
-        Default *False* (rough cells → high W; source-area interpretation).
     w_min : float, optional
         Lower clamp.  Default ``0.005``.
     """
     return WeightBuilder(w_min=w_min).add(
-        SurfaceRoughnessWeight(grid, w_min=w_min, invert=invert)
+        SurfaceRoughnessWeight(grid, w_min=w_min)
     )
 
 
@@ -171,7 +168,6 @@ def preset_rainfall_ndvi_roughness(
     ndvi,
     grid,
     combine: str = "mean",
-    roughness_invert: bool = False,
     w_min: float = 0.005,
 ) -> WeightBuilder:
     """
@@ -187,8 +183,6 @@ def preset_rainfall_ndvi_roughness(
         Landlab grid with ``'topographic__elevation'``.
     combine : str, optional
         Combination mode.  Default ``'mean'``.
-    roughness_invert : bool, optional
-        Sign convention for TRI.  Default *False*.
     w_min : float, optional
         Lower clamp.  Default ``0.005``.
     """
@@ -196,5 +190,5 @@ def preset_rainfall_ndvi_roughness(
         WeightBuilder(combine=combine, w_min=w_min)
         .add(RainfallWeight(rainfall, w_min=w_min))
         .add(NDVIWeight(ndvi, w_min=w_min))
-        .add(SurfaceRoughnessWeight(grid, w_min=w_min, invert=roughness_invert))
+        .add(SurfaceRoughnessWeight(grid, w_min=w_min))
     )

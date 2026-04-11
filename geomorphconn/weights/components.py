@@ -155,18 +155,16 @@ class SurfaceRoughnessWeight:
         \\text{TRI}(i) = \\sqrt{\\sum_{j \\in \\mathcal{N}(i)} (z_j - z_i)^2}
 
     where :math:`\\mathcal{N}(i)` is the 3×3 Moore neighbourhood.  TRI is then
-    min-max normalised to ``[0, 1]``.
+    min-max normalised to ``[0, 1]`` and inverted to ``[1, 0]`` so that
+    high roughness produces low weight (impedance interpretation).
 
-    **Sign convention (``invert`` parameter)**
+    **Physical interpretation**
 
-    The physical meaning of roughness in IC analysis depends on context:
-
-    * ``invert=False`` (default) — rough cells receive *high* W, reflecting
-      higher sediment availability and detachment potential (source-area
-      interpretation; e.g., talus, badlands).
-    * ``invert=True`` — rough cells receive *low* W, reflecting higher
-      hydraulic roughness that impedes downslope transfer (impedance
-      interpretation; follows Cavalli et al. 2013 Appendix roughness proxy).
+    High roughness represents high impedance to sediment transfer. Therefore:
+    * Rough cells receive *low* W, reflecting higher hydraulic roughness
+      that impedes downslope movement.
+    * This impedance-based interpretation aligns physically with resistance
+      or friction effects (follows Cavalli et al. 2013 Appendix roughness proxy).
 
     Parameters
     ----------
@@ -174,8 +172,6 @@ class SurfaceRoughnessWeight:
         Landlab grid with ``'topographic__elevation'`` at nodes.
     w_min : float, optional
         Lower clamp.  Default ``0.005``.
-    invert : bool, optional
-        If *True*, return ``1 − TRI_norm`` (rough → low W).  Default *False*.
 
     References
     ----------
@@ -190,11 +186,9 @@ class SurfaceRoughnessWeight:
         self,
         grid,
         w_min: float = 0.005,
-        invert: bool = False,
     ) -> None:
         self._grid = grid
         self._w_min = float(w_min)
-        self._invert = bool(invert)
 
     def compute(self) -> np.ndarray:
         """Return TRI-based roughness weight, shape ``(n_nodes,)``."""
@@ -220,8 +214,8 @@ class SurfaceRoughnessWeight:
 
         tri_flat = np.sqrt(tri).ravel()
         normed = _minmax_norm(tri_flat)
-        if self._invert:
-            normed = 1.0 - normed
+        # Always invert: high roughness → low W (impedance interpretation)
+        normed = 1.0 - normed
         return _clamp(normed, self._w_min, 1.0)
 
 

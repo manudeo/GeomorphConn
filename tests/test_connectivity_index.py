@@ -467,11 +467,20 @@ class TestSurfaceRoughnessWeight:
         assert (w >= 0.005 - 1e-12).all()
         assert (w <= 1.0 + 1e-12).all()
 
-    def test_invert_differs(self):
-        g1, g2 = _make_grid(), _make_grid()
-        w_norm = SurfaceRoughnessWeight(g1, invert=False).compute()
-        w_inv = SurfaceRoughnessWeight(g2, invert=True).compute()
-        assert not np.allclose(w_norm, w_inv)
+    def test_impedance_interpretation(self):
+        """High roughness should produce low weight (impedance interpretation)."""
+        grid = _make_grid()
+        # Create elevated terrain at center (high roughness/TRI)
+        z = grid.at_node["topographic__elevation"].reshape(grid.number_of_node_rows, grid.number_of_node_columns)
+        center_r, center_c = grid.number_of_node_rows // 2, grid.number_of_node_columns // 2
+        z[center_r, center_c] += 100  # Add tall peak at center
+        
+        w = SurfaceRoughnessWeight(grid).compute()
+        # Center node has high roughness/TRI → should have low weight
+        center_node = center_r * grid.number_of_node_columns + center_c
+        # High roughness at center should produce lower weight than average
+        assert w[center_node] < np.mean(w)
+
 
 
 class TestLandCoverWeight:
