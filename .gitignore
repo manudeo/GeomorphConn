@@ -27,4 +27,9 @@ PUBLISHING_GUIDE.md
 $RECYCLE.BIN/
 J Comput Chem - 2014 - Smeeton - Visualizing energy landscapes with metric disconnectivity graphs.pdf
 Research_paper_reprints_Manudeo_Singh/
-Borselli_Recipy.txt
+Borselli_Recipe.txt
+Cavalli_IC_outlet_TauDEM.py
+SedInConnect_*.py
+empirical_sweep*.py
+sweep_output.log
+sweep_results*.json
