@@ -124,7 +124,7 @@ def _align_uploaded_to_reference(dem_file, ndvi_file, rainfall_file, weight_file
 
     def _open_da(path: Path):
         obj: Any = rxr.open_rasterio(path, masked=True)
-        return obj.squeeze(drop=True) if hasattr(obj, "squeeze") else obj[0]
+        return obj.squeeze(drop=True)
 
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         p_dem = Path(tmpdir) / "dem.tif"
@@ -177,12 +177,10 @@ def _align_uploaded_to_reference(dem_file, ndvi_file, rainfall_file, weight_file
         finally:
             # Close xarray/rioxarray handles explicitly (important on Windows).
             for da in {**aligned, **ds_map}.values():
-                close_fn = getattr(da, "close", None)
-                if callable(close_fn):
-                    try:
-                        close_fn()
-                    except Exception:
-                        pass
+                try:
+                    da.close()
+                except Exception:
+                    pass
             ref_ds = None
             aligned.clear()
             ds_map.clear()

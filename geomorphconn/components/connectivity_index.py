@@ -41,14 +41,11 @@ try:
 except ImportError:  # pragma: no cover
     _NUMBA = False
 
-# ── Flow-director name aliases ────────────────────────────────────────────────
+# ── Flow-director names ──────────────────────────────────────────────────────
 _LL_DIRECTORS = {
-    "D8"                    : "FlowDirectorSteepest",
-    "FlowDirectorSteepest"  : "FlowDirectorSteepest",
-    "DINF"                  : "FlowDirectorDINF",
-    "FlowDirectorDINF"      : "FlowDirectorDINF",
-    "MFD"                   : "FlowDirectorMFD",
-    "FlowDirectorMFD"       : "FlowDirectorMFD",
+    "D8": "FlowDirectorSteepest",
+    "DINF": "FlowDirectorDINF",
+    "MFD": "FlowDirectorMFD",
 }
 
 
@@ -213,13 +210,13 @@ class ConnectivityIndex(Component):
         output distances (D_up, D_dn) will be in meters.
     flow_director : str, optional
         Flow algorithm for **upstream** accumulation.
-        ``'D8'``, ``'DINF'``, ``'MFD'`` (aliases accepted).
+        ``'D8'``, ``'DINF'``, or ``'MFD'``.
         Default: ``'DINF'``.
     weight : WeightBuilder or array_like or None, optional
         Controls how the spatial weight W is constructed.  Three forms:
 
-        * **None** (default) — uses *ndvi* and *rainfall* kwargs (legacy
-          interface, backward compatible).  Equivalent to
+                * **None** (default) — uses *ndvi* and *rainfall* kwargs.
+                    Equivalent to
           ``preset_rainfall_ndvi(rainfall, ndvi)``.
         * **WeightBuilder** — a fully configured weight pipeline built from
           one or more components (rainfall, NDVI, land-cover C-factor,
@@ -470,7 +467,7 @@ class ConnectivityIndex(Component):
         # Three modes:
         #   1. weight=WeightBuilder  → use builder directly
         #   2. weight=array_like     → pre-computed W, only clamp applied
-        #   3. weight=None           → legacy ndvi= / rainfall= interface
+        #   3. weight=None           → ndvi= / rainfall= interface
         if weight is not None:
             from ..weights import WeightBuilder
             if isinstance(weight, WeightBuilder):
@@ -493,7 +490,7 @@ class ConnectivityIndex(Component):
                     UserWarning, stacklevel=2,
                 )
         else:
-            # Legacy interface: build default WeightBuilder from ndvi + rainfall
+            # Default interface: build weight from ndvi + rainfall
             self._weight_builder = None
             self._weight_array   = None
             # Store for _build_default_weight()
@@ -503,7 +500,7 @@ class ConnectivityIndex(Component):
         self._weight_mode = (
             "builder"    if self._weight_builder is not None else
             "precomputed" if (weight is not None and self._weight_builder is None)
-            else "legacy"
+            else "ndvi_rainfall"
         )
 
         if not _NUMBA:
@@ -526,14 +523,14 @@ class ConnectivityIndex(Component):
         ----------
         weight : WeightBuilder, array_like, or None
             New weight specification.  Same forms as the constructor *weight*
-            parameter.  Pass *None* to revert to the legacy ndvi/rainfall mode.
+            parameter.  Pass *None* to revert to the ndvi/rainfall mode.
         """
         from ..weights import WeightBuilder
         n = self._grid.number_of_nodes
         if weight is None:
             self._weight_builder = None
             self._weight_array   = None
-            self._weight_mode    = "legacy"
+            self._weight_mode    = "ndvi_rainfall"
         elif isinstance(weight, WeightBuilder):
             self._weight_builder = weight
             self._weight_array   = None
@@ -550,13 +547,13 @@ class ConnectivityIndex(Component):
 
     def update_ndvi(self, ndvi):
         """
-        Replace NDVI values (legacy interface).
+        Replace NDVI values (ndvi/rainfall mode).
 
-        Only has effect when *weight* was not set (legacy ndvi/rainfall mode).
+        Only has effect when *weight* was not set (ndvi/rainfall mode).
         To update a WeightBuilder pipeline, call :meth:`update_weight` with a
         new builder.
         """
-        if self._weight_mode != "legacy":
+        if self._weight_mode != "ndvi_rainfall":
             warnings.warn(
                 "update_ndvi() has no effect when 'weight' is set. "
                 "Use update_weight() instead.",
@@ -569,11 +566,11 @@ class ConnectivityIndex(Component):
 
     def update_rainfall(self, rainfall):
         """
-        Replace rainfall values (legacy interface).
+        Replace rainfall values (ndvi/rainfall mode).
 
-        Only has effect when *weight* was not set (legacy ndvi/rainfall mode).
+        Only has effect when *weight* was not set (ndvi/rainfall mode).
         """
-        if self._weight_mode != "legacy":
+        if self._weight_mode != "ndvi_rainfall":
             warnings.warn(
                 "update_rainfall() has no effect when 'weight' is set. "
                 "Use update_weight() instead.",
@@ -789,7 +786,7 @@ class ConnectivityIndex(Component):
         W is resolved from one of three modes set at construction time:
         - 'builder'     : call WeightBuilder.build()
         - 'precomputed' : use stored array (only clamp)
-        - 'legacy'      : legacy NDVI + rainfall formula
+        - 'ndvi_rainfall': NDVI + rainfall formula
         """
         n = self._grid.number_of_nodes
 
@@ -802,7 +799,7 @@ class ConnectivityIndex(Component):
                 self._weight_array.astype(np.float64), self._w_min, self._w_max
             )
 
-        else:  # legacy: ndvi + rainfall
+        else:  # ndvi_rainfall mode
             rf      = self._rainfall.astype(np.float64)
             rf_min, rf_max = rf.min(), rf.max()
             RF_norm = (rf - rf_min) / (rf_max - rf_min) if rf_max > rf_min \

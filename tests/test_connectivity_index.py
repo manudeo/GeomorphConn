@@ -81,6 +81,11 @@ class TestInit:
         with pytest.raises(ValueError):
             ConnectivityIndex(grid, flow_director="NONSENSE")
 
+    def test_old_flow_director_aliases_raise(self, grid):
+        for old_name in ("FlowDirectorSteepest", "FlowDirectorDINF", "FlowDirectorMFD"):
+            with pytest.raises(ValueError):
+                ConnectivityIndex(grid, flow_director=old_name)
+
     def test_ndvi_wrong_length_raises(self, grid):
         with pytest.raises(ValueError, match="'ndvi' length"):
             ConnectivityIndex(grid, ndvi=np.zeros(5))
@@ -170,11 +175,8 @@ class TestFlowDirectors:
         "director",
         [
             "D8",
-            "FlowDirectorSteepest",
             "DINF",
-            "FlowDirectorDINF",
             "MFD",
-            "FlowDirectorMFD",
         ],
     )
     def test_director_runs(self, director):
