@@ -387,6 +387,54 @@ with Spatial Analyst, 3D Analyst, and Image Analyst licences. See
 
 ---
 
+## Example Results
+
+GeomorphConn has been applied to the **Moscardo catchment**, a highly active debris-flow system in the Italian Alps.
+The example below demonstrates IC computation at **1 m resolution (coarsened to 2 m)** using D-infinity flow routing
+with `DepressionFinderAndRouter` and custom rainfall-informed weights.
+
+### Moscardo Catchment, Italian Alps (Italy)
+
+**Study area:** 1,417 × 1,833 cells @ 2 m resolution; 2,589 km² projected extent
+
+#### IC toward outlet (no target constraint)
+
+![IC Outlet DINF](examples/IC_Outlet_DINF.png)
+
+**Parameters:**
+- Flow director: D-infinity (distributed multi-receiver flow)
+- Depression handler: DepressionFinderAndRouter (routes through pits without modifying DEM)
+- Weights: Custom rainfall-informed weight raster (W_RI)
+- No explicit target; IC computed toward basin outlet
+- Grid: 1,417 rows × 1,833 cols @ 2 m resolution
+
+**IC statistics:**
+- Min / Max: –6.93 / –1.10
+- Mean ± Std: –3.98 ± 0.46
+- Valid cells: 1,059,874 / 2,589,910 (41%)
+- Ddn extremely high (up to 86,117 m) in low-connectivity areas
+- IC values are consistently negative in this steep, high-relief basin due to high downstream impedance
+
+#### IC toward 5,000-cell stream network (auto-detected from flow accumulation)
+
+![IC Target 5k DINF](examples/IC_Target5k_DINF.png)
+
+**Parameters:**
+- Flow director: D-infinity
+- Depression handler: DepressionFinderAndRouter
+- Weights: Custom rainfall-informed weight raster (W_RI)
+- Target: Auto-detected stream network (cells draining ≥5,000 upslope cells)
+- Grid: 1,417 rows × 1,833 cols @ 2 m resolution
+
+**IC statistics:**
+- Min / Max: –6.64 / +1.51
+- Mean ± Std: –2.12 ± 1.04
+- Valid cells: 1,269,193 / 2,589,910 (49%)
+- IC range spans negative and positive values, indicating spatially variable connectivity to the stream network
+- Higher IC values in valley bottoms and contributing areas directly connected to streams
+
+---
+
 ## Citation
 
 If you use this software, please cite:
