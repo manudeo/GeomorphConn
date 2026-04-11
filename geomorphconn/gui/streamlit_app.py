@@ -68,19 +68,21 @@ def _compute_ic(
 
     grid = RasterModelGrid(dem.shape, xy_spacing=float(xy_spacing))
     grid.add_field("topographic__elevation", np.flipud(dem).ravel(), at="node")
+    ci_params = inspect.signature(ConnectivityIndex.__init__).parameters
 
     if user_weight is not None:
         ci_kwargs = {
             "flow_director": flow_director,
             "weight": np.flipud(user_weight).ravel(),
             "target_nodes": target_nodes,
-            "stream_threshold": stream_threshold,
             "w_min": w_min,
             "w_max": w_max,
             "use_degree_approx": use_degree_approx,
             "use_aspect_weighting": use_aspect_weighting,
         }
-        if "fill_sinks" in inspect.signature(ConnectivityIndex.__init__).parameters:
+        if "stream_threshold" in ci_params:
+            ci_kwargs["stream_threshold"] = stream_threshold
+        if "fill_sinks" in ci_params:
             ci_kwargs["fill_sinks"] = fill_sinks
         ic = ConnectivityIndex(
             grid,
@@ -99,13 +101,14 @@ def _compute_ic(
             "flow_director": flow_director,
             "weight": wb,
             "target_nodes": target_nodes,
-            "stream_threshold": stream_threshold,
             "w_min": w_min,
             "w_max": w_max,
             "use_degree_approx": use_degree_approx,
             "use_aspect_weighting": use_aspect_weighting,
         }
-        if "fill_sinks" in inspect.signature(ConnectivityIndex.__init__).parameters:
+        if "stream_threshold" in ci_params:
+            ci_kwargs["stream_threshold"] = stream_threshold
+        if "fill_sinks" in ci_params:
             ci_kwargs["fill_sinks"] = fill_sinks
 
         ic = ConnectivityIndex(grid, **ci_kwargs)
