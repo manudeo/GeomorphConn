@@ -87,6 +87,10 @@ grid (`dem` by default, or `ndvi` / `rainfall`).
 
 `--weight-factors` lets users choose one, two, or all three factors
 (`rainfall`, `ndvi`, `roughness`).
+For `roughness`, GeomorphConn uses the Cavalli-style residual roughness index:
+1) subtract a local DEM mean (odd `--roughness-detrend-window`),
+2) compute local residual standard deviation (odd `--roughness-std-window`),
+3) convert to weight with $W = 1 - RI/RI_{max}$ and clamp to a positive floor.
 Examples:
 
 - Roughness only (DEM-only):
@@ -177,11 +181,12 @@ Direct GEE-driven GUI workflow is planned as future work.
 Use this quick reference to interpret the main checkbox/toggle options.
 
 - `Use supplied weight raster (W)` (GUI) / `--weight-raster` (CLI): use a precomputed W raster and skip internal NDVI/rainfall/roughness factor computation. In GUI, NDVI and rainfall inputs are hidden in this mode.
-- `Use degree approximation` (GUI) / `--use-degree-approx` (CLI): if enabled, use $S = \theta^\circ/100$; if disabled, use $S = \tan(\theta)$.
+- Slope convention (GUI/CLI): slope is always interpreted as dy/dx, equivalent to ArcGIS/TauDEM `percent_rise / 100`. If you provide an external slope raster/field, provide it in this form.
 - `Use aspect weighting` (GUI) / `--use-aspect-weighting` (CLI): enable TauDEM-style partition weighting for multi-receiver upstream accumulation.
 - `Auto-align rasters` (GUI) / `--auto-reproject` (CLI): align all rasters to a selected reference grid before computation.
 - `Fill sinks before routing (ArcGIS-like)` (GUI): explicitly fill depressions before routing (`Fill -> FlowDirection -> FlowAccumulation`) to better match ArcGIS workflows.
 - `Reference grid` (GUI/CLI): choose which raster grid (`dem`, `ndvi`, `rainfall`, or `weight`) is used as the alignment target.
+- `Roughness detrend window` / `Roughness std window` (GUI) and `--roughness-detrend-window` / `--roughness-std-window` (CLI): odd moving-window sizes used by the Cavalli roughness method.
 - `w_min` / `w_max` (GUI): lower and upper clamps for weight scaling; GUI now accepts values to 5 decimal places.
 - `IC mode` (GUI): choose `Outlet` for standard basin-outlet IC or `Target` to route IC toward a target defined by either flow accumulation threshold or a vector file.
 - **Target definition method (GUI, Target mode only):** choose one of:

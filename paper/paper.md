@@ -101,8 +101,11 @@ provided:
   [@Wischmeier1978; @Borselli2008] via a lookup table.  Built-in tables are
   provided for ESA WorldCover 10 m [@WorldCover2021], CORINE Land Cover 2018,
   and MODIS IGBP.
-- `SurfaceRoughnessWeight` — Terrain Ruggedness Index (TRI; @Riley1999)
-  normalised from the DEM; enables weighting with no satellite data at all.
+- `SurfaceRoughnessWeight` — residual roughness index from DEM morphology
+  following @CavalliMarchi2008: (i) local-mean detrending, (ii) local residual
+  standard deviation, then normalized for IC weighting as
+  $W = 1 - RI/RI_{max}$ with a positive floor; enables weighting with no
+  satellite data at all.
 - `CustomWeight` — accepts any pre-computed array, enabling physics-based
   erosion model outputs or published maps.
 
@@ -200,10 +203,10 @@ bilinear-resampled to the DEM grid before returning. {#tbl:gee}
 | Preset function | Components | Typical use case |
 |---|---|---|
 | `preset_rainfall_ndvi` | RF + NDVI C-factor | Dubey, Singh & Jain (submitted) |
-| `preset_roughness_only` | TRI from DEM | DEM-only; no satellite data |
+| `preset_roughness_only` | Cavalli roughness from DEM | DEM-only; no satellite data |
 | `preset_landcover_only` | LC C-factor | Borselli (2008) spirit |
 | `preset_rainfall_landcover` | RF + LC C-factor | Hydrology + land cover |
-| `preset_rainfall_ndvi_roughness` | RF + NDVI + TRI | Full three-component weight |
+| `preset_rainfall_ndvi_roughness` | RF + NDVI + Cavalli roughness | Full three-component weight |
 
 Table: Preset `WeightBuilder` factory functions. All return a `WeightBuilder`
 that can be further customised via `.add()`. {#tbl:presets}

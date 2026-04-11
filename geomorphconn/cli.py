@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import datetime
+import math
 import subprocess
 import sys
 import gc
@@ -12,6 +14,7 @@ from typing import Any
 import numpy as np
 import rasterio
 from landlab import RasterModelGrid
+from rasterio.transform import Affine
 
 from geomorphconn import ConnectivityIndex
 from geomorphconn import __version__ as _PKG_VERSION
@@ -26,6 +29,7 @@ _FIELD_MAP = {
     "S": "connectivity_index__S",
     "Wmean": "connectivity_index__Wmean",
     "Smean": "connectivity_index__Smean",
+    "ACCfinal": "connectivity_index__ACCfinal",
 }
 
 
@@ -151,6 +155,120 @@ def _write_raster(path: Path, array2d: np.ndarray, profile: dict):
         dst.write(data, 1)
 
 
+def _coarsen_rasters(arrs: dict[str, np.ndarray | None], factor: int, profile: dict):
+    """Block-mean coarsen all raster arrays by integer factor."""
+    if factor <= 1:
+        return arrs, profile
+
+    def _block_nanmean(arr: np.ndarray) -> np.ndarray:
+        r, c = arr.shape
+        nr, nc = r // factor, c // factor
+        if nr == 0 or nc == 0:
+            raise ValueError(
+                f"DEM coarsen factor {factor} is too large for raster shape {r}x{c}. "
+                f"Choose a factor no greater than {min(r, c)}."
+            )
+        trimmed = arr[: nr * factor, : nc * factor]
+        blocks = trimmed.reshape(nr, factor, nc, factor)
+        valid = np.isfinite(blocks)
+        counts = valid.sum(axis=(1, 3))
+        sums = np.where(valid, blocks, 0.0).sum(axis=(1, 3), dtype=np.float64)
+        out = np.full((nr, nc), np.nan, dtype=np.float64)
+        np.divide(sums, counts, out=out, where=counts > 0)
+        return out
+
+    coarsened: dict[str, np.ndarray | None] = {}
+    for key, arr in arrs.items():
+        if arr is None:
+            coarsened[key] = None
+            continue
+        coarsened[key] = _block_nanmean(arr)
+
+    old_t = profile["transform"]
+    new_t = Affine(old_t.a * factor, old_t.b, old_t.c, old_t.d, old_t.e * factor, old_t.f)
+    ref_shape = next(v.shape for v in coarsened.values() if v is not None)
+    new_profile = {
+        **profile,
+        "transform": new_t,
+        "width": ref_shape[1],
+        "height": ref_shape[0],
+    }
+    return coarsened, new_profile
+
+
+def _write_cli_run_params_txt(
+    txt_path: Path,
+    *,
+    args,
+    dem_transform,
+    dem_crs,
+    dem_shape: tuple,
+    all_layers: dict,
+) -> None:
+    """Write a plain-text run summary (parameters + layer stats) to *txt_path*."""
+    lines: list[str] = []
+    lines.append(f"GeomorphConn v{_PKG_VERSION} \u2013 Run Summary")
+    lines.append("=" * 45)
+    lines.append(f"Run date/time     : {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append("")
+    lines.append("--- Input files ---")
+    lines.append(f"DEM               : {args.dem}")
+    lines.append(f"NDVI              : {args.ndvi or 'N/A'}")
+    lines.append(f"Rainfall          : {args.rainfall or 'N/A'}")
+    lines.append(f"Weight raster     : {args.weight_raster or 'N/A'}")
+    lines.append("")
+    lines.append("--- Parameters ---")
+    lines.append(f"Flow director     : {args.flow_director}")
+    lines.append(f"Depression finder : {args.depression_finder}")
+    if args.weight_raster:
+        lines.append("Weight factors    : N/A (supplied weight raster)")
+    else:
+        lines.append(f"Weight factors    : {', '.join(args.weight_factors)}")
+        lines.append(f"Weight combine    : {args.weight_combine}")
+        if "roughness" in (args.weight_factors or []):
+            lines.append(f"  Roughness detrend window : {args.roughness_detrend_window}")
+            lines.append(f"  Roughness std window     : {args.roughness_std_window}")
+    lines.append(f"w_min             : {args.w_min}")
+    lines.append(f"w_max             : {args.w_max}")
+    lines.append(f"Aspect weighting  : {args.use_aspect_weighting}")
+    lines.append(f"DEM coarsen       : {args.dem_coarsen_factor}\u00d7")
+    lines.append(f"Stream threshold  : {args.stream_threshold or 'N/A'}")
+    lines.append(f"Target vector     : {args.target_vector or 'N/A'}")
+    lines.append(f"Auto reproject    : {args.auto_reproject}")
+    lines.append(f"Reference grid    : {args.reference_grid}")
+    lines.append("")
+    lines.append("--- Output grid ---")
+    lines.append(f"Grid shape        : {dem_shape[0]} \u00d7 {dem_shape[1]} (rows \u00d7 cols)")
+    lines.append(
+        f"Cell size         : {abs(dem_transform.a):.4f} (x) \u00d7 {abs(dem_transform.e):.4f} (y)"
+    )
+    lines.append(f"CRS               : {dem_crs or 'unknown'}")
+    lines.append(f"Output prefix     : {args.prefix}")
+    lines.append(f"Output directory  : {args.out_dir}")
+    lines.append("")
+    lines.append("--- Output layer statistics ---")
+    _hdr = (
+        f"{'Layer':<12} {'Valid_cells':>12} {'Min':>10} {'Max':>10}"
+        f" {'Mean':>10} {'Std':>10} {'Median':>10}"
+    )
+    lines.append(_hdr)
+    lines.append("-" * len(_hdr))
+    for key, arr in all_layers.items():
+        valid = arr[np.isfinite(arr)]
+        if valid.size > 0:
+            lines.append(
+                f"{key:<12} {valid.size:>12d} {float(np.min(valid)):>10.4f}"
+                f" {float(np.max(valid)):>10.4f} {float(np.mean(valid)):>10.4f}"
+                f" {float(np.std(valid)):>10.4f} {float(np.median(valid)):>10.4f}"
+            )
+        else:
+            lines.append(
+                f"{key:<12} {'0':>12} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>10}"
+            )
+    txt_path.parent.mkdir(parents=True, exist_ok=True)
+    txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _run_command(args) -> int:
     def _show_progress(done: int, total: int, message: str) -> None:
         pct = int((done / total) * 100)
@@ -180,6 +298,14 @@ def _run_command(args) -> int:
             file=sys.stderr,
         )
         return 2
+
+    if ("roughness" in factors) and (not use_supplied_weight):
+        if args.roughness_detrend_window < 1 or (args.roughness_detrend_window % 2) == 0:
+            print("Error: --roughness-detrend-window must be a positive odd integer.", file=sys.stderr)
+            return 2
+        if args.roughness_std_window < 1 or (args.roughness_std_window % 2) == 0:
+            print("Error: --roughness-std-window must be a positive odd integer.", file=sys.stderr)
+            return 2
 
     ndvi_path = Path(args.ndvi) if args.ndvi else None
     rainfall_path = Path(args.rainfall) if args.rainfall else None
@@ -247,6 +373,20 @@ def _run_command(args) -> int:
         print("Error: non-square pixels are not supported by this CLI.", file=sys.stderr)
         return 2
 
+    if args.dem_coarsen_factor > 1:
+        arr_dict = {"dem": dem, "ndvi": ndvi, "rainfall": rainfall, "weight": user_weight}
+        try:
+            arr_dict, dem_profile = _coarsen_rasters(arr_dict, int(args.dem_coarsen_factor), dem_profile)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+        dem = arr_dict["dem"]
+        ndvi = arr_dict["ndvi"]
+        rainfall = arr_dict["rainfall"]
+        user_weight = arr_dict["weight"]
+        dem_transform = dem_profile["transform"]
+        dx = float(abs(dem_transform.a))
+
     grid = RasterModelGrid(dem.shape, xy_spacing=dx)
     grid.add_field("topographic__elevation", np.flipud(dem).ravel(), at="node")
 
@@ -295,9 +435,9 @@ def _run_command(args) -> int:
             weight=np.flipud(user_weight).ravel(),
             target_nodes=target_nodes,
             stream_threshold=args.stream_threshold,
+            depression_finder=None if args.depression_finder == "none" else args.depression_finder,
             w_min=args.w_min,
             w_max=args.w_max,
-            use_degree_approx=args.use_degree_approx,
             use_aspect_weighting=args.use_aspect_weighting,
         )
     else:
@@ -314,7 +454,12 @@ def _run_command(args) -> int:
             weight_builder.add(NDVIWeight(np.flipud(ndvi).ravel(), w_min=args.w_min))
         if "roughness" in factors:
             weight_builder.add(
-                SurfaceRoughnessWeight(grid, w_min=args.w_min)
+                SurfaceRoughnessWeight(
+                    grid,
+                    detrend_window=args.roughness_detrend_window,
+                    std_window=args.roughness_std_window,
+                    w_min=args.w_min,
+                )
             )
 
         ic = ConnectivityIndex(
@@ -323,9 +468,9 @@ def _run_command(args) -> int:
             weight=weight_builder,
             target_nodes=target_nodes,
             stream_threshold=args.stream_threshold,
+            depression_finder=None if args.depression_finder == "none" else args.depression_finder,
             w_min=args.w_min,
             w_max=args.w_max,
-            use_degree_approx=args.use_degree_approx,
             use_aspect_weighting=args.use_aspect_weighting,
         )
 
@@ -344,12 +489,83 @@ def _run_command(args) -> int:
 
     out_dir = Path(args.out_dir)
     outputs = args.outputs
+    if "all" in outputs:
+        outputs = sorted(_FIELD_MAP.keys())
     _show_progress(4, total_steps, "Writing outputs")
+
+    # Collect all 8 output arrays (for PNG and statistics, regardless of --outputs selection)
+    all_layers: dict = {
+        key: np.flipud(grid.at_node[field].reshape(dem.shape))
+        for key, field in _FIELD_MAP.items()
+    }
+
+    # Write only the requested TIFs
     for key in outputs:
-        field = _FIELD_MAP[key]
-        arr = np.flipud(grid.at_node[field].reshape(dem.shape))
         out_path = out_dir / f"{args.prefix}{key}.tif"
-        _write_raster(out_path, arr, dem_profile)
+        _write_raster(out_path, all_layers[key], dem_profile)
+
+    # Write composite preview PNG (all 8 layers in a 4×2 grid)
+    try:
+        import matplotlib.pyplot as plt
+
+        import matplotlib.colors as mcolors
+
+        _log_keys = {"ACCfinal", "Dup"}
+
+        def _imshow_kw(key: str, arr: np.ndarray) -> dict:
+            valid = arr[np.isfinite(arr)]
+            if key in _log_keys:
+                vmin = float(np.percentile(valid, 2)) if valid.size > 0 else None
+                vmax = float(np.percentile(valid, 98)) if valid.size > 0 else None
+                vmin = max(vmin, 1e-6) if vmin is not None and vmin <= 0 else vmin
+                vmax = max(vmax, (vmin or 1e-6) * 10) if vmax is not None and vmax <= (vmin or 0) else vmax
+                try:
+                    norm = mcolors.LogNorm(vmin=vmin, vmax=vmax)
+                except Exception:
+                    norm = None
+                return {"norm": norm, "cmap": "viridis"}
+            else:
+                if valid.size > 0:
+                    vmin = float(np.percentile(valid, 2))
+                    vmax = float(np.percentile(valid, 98))
+                else:
+                    vmin = vmax = None
+                return {"vmin": vmin, "vmax": vmax, "cmap": "viridis"}
+
+        ncols = 4
+        nrows = math.ceil(len(_FIELD_MAP) / ncols)
+        fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 4, nrows * 3.5))
+        for ax, (key, arr) in zip(np.array(axes).flatten(), all_layers.items()):
+            masked = np.ma.masked_invalid(arr)
+            kw = _imshow_kw(key, arr)
+            im = ax.imshow(masked, origin="upper", **kw)
+            ax.set_title(key, fontsize=9)
+            ax.tick_params(labelsize=6)
+            fig.colorbar(im, ax=ax, shrink=0.75, pad=0.02)
+        fig.suptitle("GeomorphConn \u2013 output layers", fontsize=11)
+        fig.tight_layout()
+        png_path = out_dir / f"{args.prefix}preview.png"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(png_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Saved preview PNG  : {png_path}")
+    except Exception as exc:
+        print(f"Warning: could not save preview PNG: {exc}", file=sys.stderr)
+
+    # Write parameter + statistics summary (.txt with same stem as IC output)
+    txt_path = out_dir / f"{args.prefix}IC.txt"
+    try:
+        _write_cli_run_params_txt(
+            txt_path,
+            args=args,
+            dem_transform=dem_transform,
+            dem_crs=dem_crs,
+            dem_shape=dem.shape,
+            all_layers=all_layers,
+        )
+        print(f"Saved run summary  : {txt_path}")
+    except Exception as exc:
+        print(f"Warning: could not write run summary: {exc}", file=sys.stderr)
 
     _show_progress(5, total_steps, "Done")
     print(f"Wrote {len(outputs)} raster(s) to {out_dir}")
@@ -430,8 +646,27 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["mean", "arithmetic_mean", "geometric_mean", "product", "max", "min", "weighted_mean"],
         help="How to combine selected weight factors",
     )
+    run_p.add_argument(
+        "--roughness-detrend-window",
+        type=int,
+        default=3,
+        help="Odd moving-window size for DEM local-mean detrending in roughness calculation",
+    )
+    run_p.add_argument(
+        "--roughness-std-window",
+        type=int,
+        default=3,
+        help="Odd moving-window size for residual standard deviation in roughness calculation",
+    )
     run_p.add_argument("--w-min", type=float, default=0.005, help="Lower clamp for W and S")
     run_p.add_argument("--w-max", type=float, default=1.0, help="Upper clamp for W")
+    run_p.add_argument(
+        "--dem-coarsen-factor",
+        type=int,
+        choices=[1, 2, 4, 8],
+        default=1,
+        help="Integer coarsening factor for all input rasters before IC computation",
+    )
     run_p.add_argument(
         "--auto-reproject",
         action=argparse.BooleanOptionalAction,
@@ -462,7 +697,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="N",
         help=(
-            "Auto-define channel network from D8 flow accumulation: cells where "
+            "Auto-define channel network from selected flow-director accumulation: cells where "
             "upstream cell count >= N are treated as targets (Borselli 2008 recipe). "
             "Typical values for 30 m grids: 500-2000. "
             "Can be combined with --target-vector (union is taken)."
@@ -470,10 +705,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_p.add_argument("--flow-director", default="DINF", choices=["D8", "DINF", "MFD"], help="Upstream flow director")
     run_p.add_argument(
-        "--use-degree-approx",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Use S = slope_degrees/100 (default); disable to use S = tan(theta)",
+        "--depression-finder",
+        default="DepressionFinderAndRouter",
+        choices=["DepressionFinderAndRouter", "none"],
+        help=(
+            "Depression-handling method passed to Landlab's FlowAccumulator D8 stage. "
+            '"DepressionFinderAndRouter" (default) routes flow through depressions without '
+            "modifying the DEM, giving better visual results than --fill-sinks. "
+            '"none" disables depression handling entirely.'
+        ),
     )
     run_p.add_argument(
         "--use-aspect-weighting",
@@ -486,7 +726,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--outputs",
         nargs="+",
         default=["IC"],
-        choices=sorted(_FIELD_MAP.keys()),
+        choices=sorted(_FIELD_MAP.keys()) + ["all"],
         help="Output rasters to write",
     )
     run_p.add_argument(

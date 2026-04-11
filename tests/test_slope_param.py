@@ -2,7 +2,7 @@
 Test custom slope parameter for ConnectivityIndex.
 
 Verify that externally-provided slopes (e.g., from TauDEM) can be
-used directly without being transformed by degree approximation.
+used directly in dy/dx form.
 """
 
 import numpy as np
@@ -11,7 +11,7 @@ from geomorphconn import ConnectivityIndex
 
 
 def test_slope_param_default_landlab():
-    """Test default behavior: Landlab-computed slope with degree approx."""
+    """Test default behavior: Landlab-computed slope in dy/dx convention."""
     grid = RasterModelGrid((10, 10), xy_spacing=30.0)
     z = grid.add_zeros("topographic__elevation", at="node")
     z += np.random.default_rng(42).random(grid.number_of_nodes) * 50
@@ -19,11 +19,10 @@ def test_slope_param_default_landlab():
     ndvi = np.full(grid.number_of_nodes, 0.4)
     rf = np.full(grid.number_of_nodes, 800.0)
     
-    # Default: use_degree_approx=True (ArcGIS-like)
-    ic = ConnectivityIndex(grid, ndvi=ndvi, rainfall=rf, use_degree_approx=True)
+    ic = ConnectivityIndex(grid, ndvi=ndvi, rainfall=rf)
     ic.run_one_step()
     
-    # Should have valid S values (degree-approximated slope)
+    # Should have valid S values.
     S = grid.at_node["connectivity_index__S"]
     assert np.all(np.isfinite(S[~grid.status_at_node.astype(bool)]))
     print(f"✓ Test 1: Default Landlab slope")
@@ -35,8 +34,7 @@ def test_slope_param_custom_uniform():
     """
     Test custom slope parameter with uniform value.
     
-    Custom slope is tan(θ), should be used directly without
-    degree approximation conversion.
+    Custom slope is dy/dx (percent_rise/100), used directly.
     """
     grid = RasterModelGrid((10, 10), xy_spacing=30.0)
     z = grid.add_zeros("topographic__elevation", at="node")
@@ -48,9 +46,7 @@ def test_slope_param_custom_uniform():
     # Custom slope: uniform tan(θ) = 0.5
     custom_slope = np.full(grid.number_of_nodes, 0.5)
     
-    ic = ConnectivityIndex(
-        grid, ndvi=ndvi, rainfall=rf, slope=custom_slope, use_degree_approx=True
-    )
+    ic = ConnectivityIndex(grid, ndvi=ndvi, rainfall=rf, slope=custom_slope)
     ic.run_one_step()
     
     S = grid.at_node["connectivity_index__S"]
@@ -74,8 +70,7 @@ def test_slope_param_custom_array():
     """
     Test custom slope parameter with varying slope array.
     
-    Verify that custom slopes are passed through without
-    degree approximation transformation.
+    Verify that custom dy/dx slopes are passed through directly.
     """
     grid = RasterModelGrid((10, 10), xy_spacing=30.0)
     z = grid.add_zeros("topographic__elevation", at="node")
@@ -87,9 +82,7 @@ def test_slope_param_custom_array():
     # Custom slope: array of varying tan(θ) values
     custom_slope = np.full(grid.number_of_nodes, 0.3)
     
-    ic = ConnectivityIndex(
-        grid, ndvi=ndvi, rainfall=rf, slope=custom_slope, use_degree_approx=True
-    )
+    ic = ConnectivityIndex(grid, ndvi=ndvi, rainfall=rf, slope=custom_slope)
     ic.run_one_step()
     
     S = grid.at_node["connectivity_index__S"]
@@ -107,9 +100,9 @@ def test_slope_param_custom_array():
         f"Expected S ≈ {expected}, got range {actual_min:.6f}–{actual_max:.6f}"
 
 
-def test_slope_param_no_degree_approx():
+def test_slope_param_landlab_vs_custom_consistency():
     """
-    Test that use_degree_approx=False works with both Landlab and custom slopes.
+    Test consistency between Landlab-derived dy/dx and custom dy/dx input.
     """
     grid = RasterModelGrid((10, 10), xy_spacing=30.0)
     z = grid.add_zeros("topographic__elevation", at="node")
@@ -118,12 +111,12 @@ def test_slope_param_no_degree_approx():
     ndvi = np.full(grid.number_of_nodes, 0.4)
     rf = np.full(grid.number_of_nodes, 800.0)
     
-    # Landlab computation with use_degree_approx=False
-    ic1 = ConnectivityIndex(grid, ndvi=ndvi, rainfall=rf, use_degree_approx=False)
+    # Landlab computation
+    ic1 = ConnectivityIndex(grid, ndvi=ndvi, rainfall=rf)
     ic1.run_one_step()
     S1 = grid.at_node["connectivity_index__S"].copy()
     
-    # Custom slope with use_degree_approx=False
+    # Custom slope using the same dy/dx values
     # (should be identical if custom slope matches Landlab's tan(θ))
     grid2 = RasterModelGrid((10, 10), xy_spacing=30.0)
     z2 = grid2.add_zeros("topographic__elevation", at="node")
@@ -131,12 +124,12 @@ def test_slope_param_no_degree_approx():
     
     custom_slope = S1.copy()  # Use Landlab's computed tan(θ) as custom
     ic2 = ConnectivityIndex(
-        grid2, ndvi=ndvi, rainfall=rf, slope=custom_slope, use_degree_approx=False
+        grid2, ndvi=ndvi, rainfall=rf, slope=custom_slope
     )
     ic2.run_one_step()
     S2 = grid2.at_node["connectivity_index__S"].copy()
     
-    print(f"✓ Test 4: use_degree_approx=False comparison")
+    print(f"✓ Test 4: Landlab/custom dy/dx consistency")
     print(f"  Landlab S range: {S1[~grid.status_at_node.astype(bool)].min():.6f} to"
           f" {S1[~grid.status_at_node.astype(bool)].max():.6f}")
     print(f"  Custom S range:  {S2[~grid2.status_at_node.astype(bool)].min():.6f} to"
@@ -147,5 +140,5 @@ if __name__ == "__main__":
     test_slope_param_default_landlab()
     test_slope_param_custom_uniform()
     test_slope_param_custom_array()
-    test_slope_param_no_degree_approx()
+    test_slope_param_landlab_vs_custom_consistency()
     print("\n✅ All slope parameter tests passed!")

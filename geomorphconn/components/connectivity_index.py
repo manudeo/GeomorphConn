@@ -4,15 +4,15 @@ connectivity_index.py
 =====================
 Landlab component implementing the hydrologically-weighted Index of
 Connectivity (IC) after Cavalli et al. (2013), extended with an NDVI-based
-C-factor and normalised rainfall as weighting factors (Dubey, Singh & Jain; submitted).
+C-factor (Singh et al., 2017)and normalised rainfall as weighting factors (Dubey, Singh & Jain; submitted).
 
 Flow routing uses Landlab's built-in FlowDirector classes (D8, D-infinity,
 and MFD). The downstream flow-path length (D_dn) always uses D8 steepest
 descent to remain consistent with the ArcGIS reference implementation.
 
 **Unit convention:** All spatial inputs (elevation, grid spacing) and outputs
-(D_up, D_dn, drainage area) are assumed to be in SI units (meters).  Slope
-is always dimensionless (rise/run) regardless of the approximation used.
+(D_up, D_dn, drainage area) are assumed to be in SI units (meters). Slope is
+always dimensionless dy/dx (rise/run), equivalent to ``percent_rise / 100``.
 
 References
 ----------
@@ -33,15 +33,16 @@ import warnings
 
 import numpy as np
 from landlab import Component
+from landlab import RasterModelGrid
 
-# ── Optional numba JIT ────────────────────────────────────────────────────────
+# Optional numba JIT
 try:
     from numba import njit as _njit
     _NUMBA = True
 except ImportError:  # pragma: no cover
     _NUMBA = False
 
-# ── Flow-director names ──────────────────────────────────────────────────────
+# Flow-director names
 _LL_DIRECTORS = {
     "D8": "FlowDirectorSteepest",
     "DINF": "FlowDirectorDINF",
@@ -68,14 +69,20 @@ def _import_ll_director(name: str):
     }[canonical]
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Accumulation kernels (Python + optional numba JIT)
-# ═════════════════════════════════════════════════════════════════════════════
+# Accumulation kernels (Python + optional numba JIT)
 
 def _acc_d8_py(weight, receivers, node_order):
     """Single-receiver weighted upstream accumulation (D8)."""
     acc = np.zeros(len(weight), dtype=np.float64)
-    for node in node_order:
+    # Accept either topological order direction.
+    n = len(weight)
+    pos = np.empty(n, dtype=np.int64)
+    pos[node_order] = np.arange(len(node_order), dtype=np.int64)
+    idx = np.arange(n, dtype=np.int64)
+    m = receivers != idx
+    downstream_first = bool(np.all(pos[receivers[m]] < pos[idx[m]]))
+    it = node_order[::-1] if downstream_first else node_order
+    for node in it:
         rec = int(receivers[node])
         if rec != node:
             acc[rec] += acc[node] + weight[node]
@@ -86,13 +93,23 @@ def _acc_mfd_py(weight, receivers, proportions, node_order):
     """Multi-receiver weighted upstream accumulation (D-inf / MFD)."""
     acc   = np.zeros(len(weight), dtype=np.float64)
     n_rec = receivers.shape[1]
-    for i in range(len(node_order)):
-        node = int(node_order[i])
+    # Accept either topological order direction.
+    n = len(weight)
+    pos = np.empty(n, dtype=np.int64)
+    pos[node_order] = np.arange(len(node_order), dtype=np.int64)
+    idx = np.arange(n, dtype=np.int64)
+    rec0 = receivers[:, 0]
+    m = rec0 >= 0
+    m &= rec0 != idx
+    downstream_first = bool(np.all(pos[rec0[m]] < pos[idx[m]]))
+    it = node_order[::-1] if downstream_first else node_order
+    for node in it:
+        node = int(node)
         val  = float(acc[node]) + float(weight[node])
         for k in range(n_rec):
             rec  = int(receivers[node, k])
             prop = float(proportions[node, k])
-            # guard: Landlab uses -1 as sentinel for unused receiver slots
+            # Landlab uses -1 as sentinel for unused receiver slots.
             if rec >= 0 and rec != node and prop > 0.0:
                 acc[rec] += val * prop
     return acc
@@ -101,15 +118,19 @@ def _acc_mfd_py(weight, receivers, proportions, node_order):
 def _ddn_d8_py(local_contrib, inv_WS, receivers, node_order):
     """
     Downstream weighted flow-path length (D_dn), D8 only.
-    Reverse-topological traversal: outlets first.
-
-    Terminal nodes (outlets / target sinks) get D_dn = inv_WS[node], matching
-    the Borselli (2008) ArcGIS recipe step:
-      ``(([X] == 0) * [inv_CS]) + [X]``
-    which ensures channel/outlet pixels carry their own pixel impedance.
+        Traverses outlets first. Terminal nodes (outlets or target sinks) get
+        D_dn = inv_WS[node], consistent with the ArcGIS Borselli recipe.
     """
     ddn = local_contrib.copy()
-    for node in node_order[::-1]:
+        # Accept either topological order direction.
+    n = len(local_contrib)
+    pos = np.empty(n, dtype=np.int64)
+    pos[node_order] = np.arange(len(node_order), dtype=np.int64)
+    idx = np.arange(n, dtype=np.int64)
+    m = receivers != idx
+    downstream_first = bool(np.all(pos[receivers[m]] < pos[idx[m]]))
+    it = node_order if downstream_first else node_order[::-1]
+    for node in it:
         rec = int(receivers[node])
         if rec == node:                 # outlet / imposed sink
             ddn[node] = inv_WS[node]
@@ -122,7 +143,8 @@ if _NUMBA:
     @_njit(cache=True)
     def _acc_d8_jit(weight, receivers, node_order):
         acc = np.zeros(len(weight))
-        for i in range(len(node_order)):
+        n = len(node_order)
+        for i in range(n - 1, -1, -1):
             node = node_order[i]
             rec  = receivers[node]
             if rec != node:
@@ -133,7 +155,7 @@ if _NUMBA:
     def _acc_mfd_jit(weight, receivers, proportions, node_order):
         acc   = np.zeros(len(weight))
         n_rec = receivers.shape[1]
-        for i in range(len(node_order)):
+        for i in range(len(node_order) - 1, -1, -1):
             node = node_order[i]
             val  = acc[node] + weight[node]
             for k in range(n_rec):
@@ -146,8 +168,7 @@ if _NUMBA:
     @_njit(cache=True)
     def _ddn_d8_jit(local_contrib, inv_WS, receivers, node_order):
         ddn = local_contrib.copy()
-        n   = len(node_order)
-        for i in range(n - 1, -1, -1):
+        for i in range(len(node_order)):
             node = node_order[i]
             rec  = receivers[node]
             if rec == node:
@@ -175,9 +196,7 @@ else:
     _ddn_d8  = _ddn_d8_py
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Main Component
-# ═════════════════════════════════════════════════════════════════════════════
+# Main component
 
 class ConnectivityIndex(Component):
     """
@@ -193,7 +212,7 @@ class ConnectivityIndex(Component):
         C       = (1 − NDVI) / 2                        [dimensionless]
         W       = clip( (RF_norm + C) / 2,  w_min, 1 ) [dimensionless]
         
-        S       = tan(θ)  or  θ° / 100                 [dimensionless, rise/run]
+        S       = dy/dx (= percent_rise / 100)         [dimensionless, rise/run]
         D_up    = W̄ · S̄ · √A                           [m]
         D_dn    = Σ d_i / (W_i · S_i)                  [m]
         IC      = log₁₀( D_up / D_dn )                  [dimensionless]
@@ -262,14 +281,16 @@ class ConnectivityIndex(Component):
         Rainfall at each node (any units).  Used only when *weight* is *None*.
         Default: spatially uniform.
     slope : array_like or str or None, optional
-        Pre-computed slope array (dimensionless, rise/run) at each node.
+        Pre-computed slope array (dimensionless dy/dx, i.e., rise/run) at each
+        node.
         Use this to supply slopes from an external tool (TauDEM, ArcGIS) for
         comparison or consistency with prior analyses.
 
-        * **None** (default): Slope is computed internally via Landlab's D8
-          steepest descent algorithm. This is the default and most reproducible.
-        * **array_like**: Must have shape (n_nodes,) with values in tan(θ) form
-          (dimensionless rise/run). Custom slopes bypass Landlab's calculation.
+                * **None** (default): Slope is computed internally via Landlab's D8
+                    steepest descent algorithm. This is the default and most reproducible.
+                * **array_like**: Must have shape ``(n_nodes,)`` with dy/dx values
+                    (equivalent to ``percent_rise / 100``). Custom slopes bypass
+                    Landlab's calculation.
         * **str**: Name of an existing grid field (e.g., pass ``'slope'`` if you
           pre-loaded TauDEM slopes into the grid).
 
@@ -311,6 +332,26 @@ class ConnectivityIndex(Component):
         This modifies the input DEM and best matches the ArcGIS-style workflow
         of Fill -> FlowDirection -> FlowAccumulation. Default is *False*,
         which routes directly on the input DEM without modification.
+        When both *fill_sinks* and *depression_finder* are enabled,
+        SinkFillerBarnes runs first (Stage 0), then depression_finder
+        is applied during flow accumulation (Stage 1).
+    depression_finder : str or None, optional
+        Name of a Landlab depression-handling component to pass directly to
+        :class:`~landlab.components.FlowAccumulator` via its
+        *depression_finder* keyword.  The recommended value is
+        ``"DepressionFinderAndRouter"``— it routes flow through depressions
+        without permanently modifying the DEM.  Default is *None* (no special
+        depression handling).  When both *fill_sinks* and *depression_finder*
+        are enabled, SinkFillerBarnes runs first (Stage 0, modifying the DEM),
+        then depression_finder is applied during flow accumulation (Stage 1,
+        handling any remaining depressions in the filled DEM).
+
+        .. note::
+            ``DepressionFinderAndRouter`` is only compatible with D8 routing.
+            It is applied exclusively to the D8 Stage-1 accumulator; the
+            secondary DINF/MFD accumulator always runs without a depression
+            finder (it instead inherits the depression-handled flow topology
+            from Stage 1).
     use_aspect_weighting : bool, optional
         If *True*, apply an additional aspect-alignment weighting to
         multi-receiver upstream routing (DINF/MFD) during D_up accumulation.
@@ -325,18 +366,6 @@ class ConnectivityIndex(Component):
         Lower clamp for W and S (prevents ÷0).  Default 0.005.
     w_max : float, optional
         Upper clamp for W.  Default 1.0.
-    use_degree_approx : bool, optional
-        Slope factor computation convention (applies to internally computed slopes only).
-        Both forms are dimensionless (rise/run):
-
-        * *True* (default): ``S = θ° / 100`` where θ° is steepest-descent angle
-          in degrees.  Matches ArcGIS and is suitable for low-gradient terrain
-          (θ < 10°, where θ° ≈ 100·tan(θ)).
-        * *False*: ``S = tan(θ)`` (physically exact, rise/run).  Use for steep
-          terrain (θ > 10°) where the approximation breaks down.
-
-        **Important:** If *slope* parameter is provided, it is assumed to be
-        in tan(θ) form and is used directly without conversion.
 
     Output grid fields
     ------------------
@@ -351,12 +380,15 @@ class ConnectivityIndex(Component):
     ``connectivity_index__W``
         Hydrological weight W [dimensionless, range 0.005–1.0].
     ``connectivity_index__S``
-        Slope factor S [dimensionless, range 0.005–1.0].  Both formulations
-        (θ°/100 or tan(θ)) are dimensionless and represent rise/run.
+        Slope factor S [dimensionless, range 0.005–1.0], represented as dy/dx
+        (equivalent to percent_rise/100).
     ``connectivity_index__Wmean``
         Area-weighted mean W over upstream contributing area [dimensionless].
     ``connectivity_index__Smean``
         Area-weighted mean S over upstream contributing area [dimensionless].
+    ``connectivity_index__ACCfinal``
+        Effective contributing cell count used in D_up averaging
+        (diagnostic layer, unit: cells).
 
     Examples
     --------
@@ -376,6 +408,17 @@ class ConnectivityIndex(Component):
 
     _name = "ConnectivityIndex"
     _unit_agnostic = False
+    _cite_as = (
+        "@article{cavalli2013connectivity,\n"
+        "  title={Geomorphometric assessment of spatial sediment connectivity in small Alpine catchments},\n"
+        "  author={Cavalli, M. and Trevisani, S. and Comiti, F. and Marchi, L.},\n"
+        "  journal={Geomorphology},\n"
+        "  volume={188},\n"
+        "  pages={31--41},\n"
+        "  year={2013},\n"
+        "  doi={10.1016/j.geomorph.2012.05.010}\n"
+        "}"
+    )
 
     _info = {
         "topographic__elevation": {
@@ -418,9 +461,14 @@ class ConnectivityIndex(Component):
             "units": "-", "mapping": "node",
             "doc": "Area-weighted mean S over upstream contributing area",
         },
+        "connectivity_index__ACCfinal": {
+            "dtype": float, "intent": "out", "optional": False,
+            "units": "cells", "mapping": "node",
+            "doc": "Effective contributing cell count used in D_up",
+        },
     }
 
-    # ── Constructor ───────────────────────────────────────────────────────────
+    # Constructor
 
     def __init__(
         self,
@@ -433,41 +481,45 @@ class ConnectivityIndex(Component):
         target_nodes=None,
         stream_threshold=None,
         fill_sinks: bool = False,
+        depression_finder: str | None = None,
         use_aspect_weighting: bool = False,
         w_min: float = 0.005,
         w_max: float = 1.0,
-        use_degree_approx: bool = True,
     ):
+        if not isinstance(grid, RasterModelGrid):
+            raise ValueError(
+                "ConnectivityIndex currently supports RasterModelGrid only. "
+                f"Got {type(grid).__name__}."
+            )
+
         super().__init__(grid)
 
         self._fd_name        = flow_director
-        # Validate director name eagerly so errors surface at construction time
+        # Validate early so invalid directors fail at construction time.
         _import_ll_director(flow_director)
         self._w_min          = float(w_min)
         self._w_max          = float(w_max)
-        self._use_deg_approx = bool(use_degree_approx)
         self._use_aspect_weighting = bool(use_aspect_weighting)
         self._fill_sinks = bool(fill_sinks)
+        # Allow both SinkFillerBarnes and depression_finder to work together:
+        # Stage 0 fills sinks (if enabled), then Stage 1 applies depression_finder.
+        self._depression_finder = depression_finder
         self._stream_threshold = int(stream_threshold) if stream_threshold is not None else None
         n = grid.number_of_nodes
 
-        # ── Slope (optional user-provided override) ────────────────────
+        # Optional user-provided slope override.
         if slope is not None:
             self._slope_array = self._coerce_field(slope, n, None, "slope")
         else:
             self._slope_array = None
 
-        # ── Target nodes ──────────────────────────────────────────────
+        # Optional target nodes.
         self._target_nodes = (
             np.asarray(target_nodes, dtype=np.int64)
             if target_nodes is not None else None
         )
 
-        # ── Weight configuration ───────────────────────────────────────
-        # Three modes:
-        #   1. weight=WeightBuilder  → use builder directly
-        #   2. weight=array_like     → pre-computed W, only clamp applied
-        #   3. weight=None           → ndvi= / rainfall= interface
+        # Weight modes: builder, precomputed array, or ndvi/rainfall.
         if weight is not None:
             from ..weights import WeightBuilder
             if isinstance(weight, WeightBuilder):
@@ -482,7 +534,7 @@ class ConnectivityIndex(Component):
                     )
                 self._weight_builder = None
                 self._weight_array   = arr
-            # Warn if ndvi/rainfall also supplied — they will be ignored
+            # ndvi/rainfall are ignored when weight is explicitly provided.
             if ndvi is not None or rainfall is not None:
                 warnings.warn(
                     "Both 'weight' and ('ndvi' / 'rainfall') were supplied. "
@@ -490,10 +542,9 @@ class ConnectivityIndex(Component):
                     UserWarning, stacklevel=2,
                 )
         else:
-            # Default interface: build weight from ndvi + rainfall
+            # Default interface: build weights from ndvi + rainfall.
             self._weight_builder = None
             self._weight_array   = None
-            # Store for _build_default_weight()
             self._ndvi     = self._coerce_field(ndvi,     n, 0.0, "ndvi")
             self._rainfall = self._coerce_field(rainfall, n, 1.0, "rainfall")
 
@@ -513,7 +564,7 @@ class ConnectivityIndex(Component):
 
         self.initialize_output_fields()
 
-    # ── Public helpers ────────────────────────────────────────────────────────
+    # Public helpers
 
     def update_weight(self, weight):
         """
@@ -581,7 +632,7 @@ class ConnectivityIndex(Component):
             rainfall, self._grid.number_of_nodes, default_val=1.0, name="rainfall"
         )
 
-    # ── Main entry point ──────────────────────────────────────────────────────
+    # Main entry point
 
     def run_one_step(self):
         """
@@ -589,30 +640,25 @@ class ConnectivityIndex(Component):
 
         All seven output fields are updated in-place.
         """
-        # 1. Fill + route
+        # 1) Fill and route
         routing = self._run_routing()
         
-        # 2. Resolve slope (custom or Landlab-computed)
+        # 2) Resolve slope (custom or Landlab-computed), always dy/dx.
         if self._slope_array is None:
-            # Landlab-computed slope: apply degree approximation if requested
             slope_tan = routing["slope_tan"]
-            if self._use_deg_approx:
-                # Convert tan(θ) to θ°/100 for ArcGIS compatibility
-                slope_tan = np.degrees(np.arctan(np.clip(slope_tan, 0.0, None))) / 100.0
         else:
-            # Custom slope: assumed to be tan(θ) already, use directly
             slope_tan = self._slope_array.copy()
 
-        # 3. W and S (S will be clamped in _compute_W_S)
+        # 3) Compute W and S (S is clamped in _compute_W_S).
         W, S = self._compute_W_S(slope_tan)
 
-        # 3. D_up via upstream accumulation
-        Dup, Wmean, Smean = self._compute_Dup(W, S, routing)
+        # 4) D_up via upstream accumulation
+        Dup, Wmean, Smean, ACCfinal = self._compute_Dup(W, S, routing)
 
-        # 4. D_dn via D8 downstream path
+        # 5) D_dn via D8 downstream path
         Ddn = self._compute_Ddn(W, S, routing)
 
-        # 5. IC
+        # 6) IC
         with np.errstate(divide="ignore", invalid="ignore"):
             IC = np.where(
                 (Dup > 0) & (Ddn > 0),
@@ -620,7 +666,7 @@ class ConnectivityIndex(Component):
                 np.nan,
             )
 
-        # In target mode, target/channel cells are masked to NaN in outputs.
+        # Mask target/channel cells in target mode.
         eff_targets = routing.get("effective_target_nodes")
         if eff_targets is not None:
             IC[eff_targets]    = np.nan
@@ -628,8 +674,9 @@ class ConnectivityIndex(Component):
             Ddn[eff_targets]   = np.nan
             Wmean[eff_targets] = np.nan
             Smean[eff_targets] = np.nan
+            ACCfinal[eff_targets] = np.nan
 
-        # 6. Write fields
+        # 7) Write fields
         g = self._grid
         g.at_node["connectivity_index__IC"][:]    = IC
         g.at_node["connectivity_index__Dup"][:]   = Dup
@@ -638,8 +685,9 @@ class ConnectivityIndex(Component):
         g.at_node["connectivity_index__S"][:]     = S
         g.at_node["connectivity_index__Wmean"][:] = Wmean
         g.at_node["connectivity_index__Smean"][:] = Smean
+        g.at_node["connectivity_index__ACCfinal"][:] = ACCfinal
 
-    # ── Routing ───────────────────────────────────────────────────────────────
+    # Routing
 
     def _run_routing(self) -> dict:
         """
@@ -680,11 +728,14 @@ class ConnectivityIndex(Component):
             SinkFillerBarnes,
         )
 
+        # Applies only to Stage 1 (D8); Stage 2 never receives a depression finder.
+        _depression_finder = self._depression_finder  # None or string name
+
         grid  = self._grid
         FDCls = _import_ll_director(self._fd_name)
         is_d8 = FDCls is FlowDirectorSteepest
 
-        # Build a working grid so we can fill sinks without mutating user DEM.
+        # Work on a copy so sink filling never mutates the user DEM.
         g_work = _RMG(grid.shape, xy_spacing=float(grid.dx))
         g_work.status_at_node[:] = grid.status_at_node
         g_work.add_field(
@@ -693,7 +744,7 @@ class ConnectivityIndex(Component):
             at="node",
         )
 
-        # ── Stage 0: explicit sink filling (ArcGIS-like) ──────────────
+        # Stage 0: optional explicit sink filling (ArcGIS-like).
         if self._fill_sinks:
             sf = SinkFillerBarnes(
                 g_work,
@@ -703,36 +754,44 @@ class ConnectivityIndex(Component):
             )
             sf.run_one_step()
 
-        # ── Stage 1: D8 (pit-filling + slope + D8 receivers) ──────────
+        # Stage 1: always true D8 for slope, D8 receivers, and ordering.
+        _d8_director = "D8"
         fa_d8 = FlowAccumulator(g_work, "topographic__elevation",
-                                flow_director="FlowDirectorSteepest")
+                                flow_director=_d8_director,
+                                depression_finder=_depression_finder)
         fa_d8.run_one_step()
 
         d8_recv   = g_work.at_node["flow__receiver_node"].copy().astype(np.int64)
-        # topographic__steepest_slope is (n,) after D8
+        # topographic__steepest_slope is 1-D after D8.
         slope_tan = np.abs(g_work.at_node["topographic__steepest_slope"].copy().ravel())
         d8_order  = g_work.at_node["flow__upstream_node_order"].copy().astype(np.int64)
 
-        # ── Resolve effective target nodes ─────────────────────────────
-        # Start with any vector-supplied target nodes.
+        # Resolve effective target nodes, starting from vector targets.
         eff_targets = self._target_nodes  # may be None
 
-        # Add stream-threshold channel nodes (Borselli RIVERMASK equivalent).
-        if self._stream_threshold is not None:
+        def _merge_stream_targets(base_targets, drainage_area):
+            """Merge vector targets with flow-accumulation-derived stream targets."""
+            if self._stream_threshold is None:
+                return base_targets
             cell_area = float(grid.dx) * float(grid.dy)
-            cell_count = g_work.at_node["drainage_area"] / cell_area
+            cell_count = drainage_area / cell_area
             stream_nodes = np.where(cell_count >= self._stream_threshold)[0].astype(np.int64)
-            if eff_targets is not None:
-                eff_targets = np.unique(np.concatenate([eff_targets, stream_nodes]))
-            elif len(stream_nodes) > 0:
-                eff_targets = stream_nodes
+            if base_targets is not None:
+                return np.unique(np.concatenate([base_targets, stream_nodes]))
+            if len(stream_nodes) > 0:
+                return stream_nodes
+            return None
 
-        # Impose effective targets on D8 receiver array (self-loop = local sink).
+        # In D8 mode, stream threshold uses D8 accumulation.
+        if is_d8:
+            eff_targets = _merge_stream_targets(eff_targets, g_work.at_node["drainage_area"])
+
+        # Impose targets on D8 receivers (self-loop means terminal sink).
         if eff_targets is not None:
             d8_recv[eff_targets] = eff_targets
 
         if is_d8:
-            # D8 is also the primary — everything comes from Stage 1.
+            # D8 is primary; Stage 1 output is final.
             return {
                 "d8_receivers"  : d8_recv,
                 "slope_tan"     : slope_tan,
@@ -744,14 +803,14 @@ class ConnectivityIndex(Component):
                 "effective_target_nodes": eff_targets,
             }
 
-        # ── Stage 2: primary director on a fresh grid ──────────────────
-        # Use the (already pit-filled) elevation from Stage 1.
+        # Stage 2: primary director on a fresh grid with Stage-1 elevation.
         g2 = _RMG(grid.shape, xy_spacing=float(grid.dx))
         g2.status_at_node[:] = grid.status_at_node
         g2.add_field("topographic__elevation",
                      g_work.at_node["topographic__elevation"].copy(),
                      at="node")
 
+        # Stage 2 runs without depression_finder (DINF/MFD incompatibility).
         fa2 = FlowAccumulator(g2, "topographic__elevation",
                               flow_director=FDCls)
         fa2.run_one_step()
@@ -761,7 +820,12 @@ class ConnectivityIndex(Component):
         order2 = g2.at_node["flow__upstream_node_order"].copy().astype(np.int64)
         da2    = g2.at_node["drainage_area"].copy()
 
-        # Impose targets
+        # In DINF/MFD mode, stream threshold follows primary accumulation.
+        eff_targets = _merge_stream_targets(eff_targets, da2)
+        if eff_targets is not None:
+            d8_recv[eff_targets] = eff_targets
+
+        # Impose targets on primary routing.
         if eff_targets is not None:
             rec2[eff_targets, :]  = eff_targets[:, None]
             prop2[eff_targets, :] = 0.0
@@ -777,7 +841,7 @@ class ConnectivityIndex(Component):
             "effective_target_nodes": eff_targets,
         }
 
-    # ── Weights ───────────────────────────────────────────────────────────────
+    # Weights
 
     def _compute_W_S(self, slope_tan: np.ndarray):
         """
@@ -799,7 +863,7 @@ class ConnectivityIndex(Component):
                 self._weight_array.astype(np.float64), self._w_min, self._w_max
             )
 
-        else:  # ndvi_rainfall mode
+        else:  # ndvi/rainfall mode
             rf      = self._rainfall.astype(np.float64)
             rf_min, rf_max = rf.min(), rf.max()
             RF_norm = (rf - rf_min) / (rf_max - rf_min) if rf_max > rf_min \
@@ -807,14 +871,12 @@ class ConnectivityIndex(Component):
             C = (1.0 - self._ndvi.astype(np.float64)) / 2.0
             W = np.clip((RF_norm + C) / 2.0, self._w_min, self._w_max)
 
-        # Slope factor S — independent of weight mode
-        # slope_tan is already in the correct form (tan(θ) or θ°/100) from run_one_step().
-        # Just clip to valid range [w_min, w_max].
+        # S is independent of weight mode and clipped to [w_min, w_max].
         S = np.clip(slope_tan, self._w_min, self._w_max)
 
         return W.astype(np.float64), S.astype(np.float64)
 
-    # ── D_up ──────────────────────────────────────────────────────────────────
+    # D_up
 
     def _compute_Dup(self, W, S, routing):
         cell_area  = float(self._grid.dx) * float(self._grid.dy)
@@ -847,9 +909,7 @@ class ConnectivityIndex(Component):
             AccW = _acc_d8(W, receivers, node_order)
             AccS = _acc_d8(S, receivers, node_order)
             if eff_targets is not None:
-                # In target mode, drainage_area from Landlab is computed before
-                # target outlets are imposed. Recompute contributing count from
-                # the modified receiver graph so each target acts as terminal.
+                # Recompute contributing count after target outlets are imposed.
                 AccA = _acc_d8(np.ones(n_nodes, dtype=np.float64), receivers, node_order)
                 ACC_final = np.maximum(AccA + 1.0, 1.0)
             else:
@@ -859,7 +919,7 @@ class ConnectivityIndex(Component):
         Smean = (AccS + S) / ACC_final
         A     = ACC_final * cell_area
         Dup   = Wmean * Smean * np.sqrt(A)
-        return Dup, Wmean, Smean
+        return Dup, Wmean, Smean, ACC_final
 
     def _build_aspect_weighted_proportions(self, receivers, proportions, d8_receivers):
         """
@@ -912,7 +972,7 @@ class ConnectivityIndex(Component):
         out[~nz, :] = proportions[~nz, :]
         return out
 
-    # ── D_dn ──────────────────────────────────────────────────────────────────
+    # D_dn
 
     def _compute_Ddn(self, W, S, routing):
         grid     = self._grid
@@ -928,7 +988,7 @@ class ConnectivityIndex(Component):
         inv_WS = 1.0 / (W * S)
         return _ddn_d8(dist * inv_WS, inv_WS, recv, order)
 
-    # ── Convenience ───────────────────────────────────────────────────────────
+    # Convenience
 
     @property
     def IC(self) -> np.ndarray:
@@ -951,6 +1011,10 @@ class ConnectivityIndex(Component):
     def S(self) -> np.ndarray:
         return self._grid.at_node["connectivity_index__S"]
 
+    @property
+    def ACCfinal(self) -> np.ndarray:
+        return self._grid.at_node["connectivity_index__ACCfinal"]
+
     def as_2d(self, field: str = "connectivity_index__IC",
               geo_order: bool = True) -> np.ndarray:
         """
@@ -967,7 +1031,7 @@ class ConnectivityIndex(Component):
         arr = self._grid.at_node[field].reshape(self._grid.shape)
         return np.flipud(arr) if geo_order else arr
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
+    # Internal helpers
 
     def _coerce_field(self, value, n, default_val, name):
         """Coerce value to numpy array; allow grid field names."""
@@ -976,6 +1040,10 @@ class ConnectivityIndex(Component):
                 return None
             return np.full(n, default_val, dtype=np.float64)
         if isinstance(value, str):
+            if value not in self._grid.at_node:
+                raise ValueError(
+                    f"'{name}' field '{value}' not found in grid.at_node"
+                )
             return self._grid.at_node[value].astype(np.float64)
         arr = np.asarray(value, dtype=np.float64).ravel()
         if len(arr) != n:

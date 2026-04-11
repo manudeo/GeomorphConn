@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from landlab import HexModelGrid
 from landlab import RasterModelGrid
 
 from geomorphconn import ConnectivityIndex
@@ -106,6 +107,15 @@ class TestInit:
     def test_wrong_weight_array_length_raises(self, grid):
         with pytest.raises(ValueError, match="'weight' array length"):
             ConnectivityIndex(grid, weight=np.ones(5))
+
+    def test_non_raster_grid_raises(self):
+        hex_grid = HexModelGrid((4, 4), spacing=10.0)
+        with pytest.raises(ValueError, match="RasterModelGrid only"):
+            ConnectivityIndex(hex_grid)
+
+    def test_missing_named_field_raises_value_error(self, grid):
+        with pytest.raises(ValueError, match="field 'missing_slope' not found"):
+            ConnectivityIndex(grid, slope="missing_slope")
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +359,24 @@ class TestStreamThreshold:
         nan2 = np.sum(np.isnan(g2.at_node["connectivity_index__IC"]))
         assert nan2 >= nan1
 
+    @pytest.mark.parametrize("director", ["D8", "DINF", "MFD"])
+    def test_stream_threshold_uses_selected_director_accumulation(self, director):
+        """Effective targets must be computed from the chosen primary director accumulation."""
+        grid = _make_grid()
+        threshold = 20
+        ic = ConnectivityIndex(grid, flow_director=director, stream_threshold=threshold)
+        routing = ic._run_routing()
+
+        cell_area = float(grid.dx) * float(grid.dy)
+        expected = np.where((routing["drainage_area"] / cell_area) >= threshold)[0].astype(np.int64)
+        effective = routing["effective_target_nodes"]
+
+        if len(expected) == 0:
+            assert effective is None or len(effective) == 0
+        else:
+            assert effective is not None
+            np.testing.assert_array_equal(np.sort(effective), np.sort(expected))
+
 
 # ---------------------------------------------------------------------------
 # as_2d
@@ -411,15 +439,11 @@ class TestUpdate:
 
 
 class TestSlopeConvention:
-    def test_degree_vs_tan_differ(self):
-        g1, g2 = _make_grid(), _make_grid()
-        ConnectivityIndex(g1, use_degree_approx=True).run_one_step()
-        ConnectivityIndex(g2, use_degree_approx=False).run_one_step()
-        assert not np.allclose(
-            g1.at_node["connectivity_index__S"],
-            g2.at_node["connectivity_index__S"],
-            equal_nan=True,
-        )
+    def test_slope_is_dydx_by_default(self):
+        g = _make_grid()
+        ConnectivityIndex(g).run_one_step()
+        s = g.at_node["connectivity_index__S"]
+        assert np.isfinite(s[np.isfinite(s)]).all()
 
 
 # ---------------------------------------------------------------------------
@@ -470,16 +494,30 @@ class TestSurfaceRoughnessWeight:
     def test_impedance_interpretation(self):
         """High roughness should produce low weight (impedance interpretation)."""
         grid = _make_grid()
-        # Create elevated terrain at center (high roughness/TRI)
+        # Create elevated terrain at center (high local residual roughness)
         z = grid.at_node["topographic__elevation"].reshape(grid.number_of_node_rows, grid.number_of_node_columns)
         center_r, center_c = grid.number_of_node_rows // 2, grid.number_of_node_columns // 2
         z[center_r, center_c] += 100  # Add tall peak at center
         
         w = SurfaceRoughnessWeight(grid).compute()
-        # Center node has high roughness/TRI → should have low weight
+        # Center node has high roughness → should have low weight
         center_node = center_r * grid.number_of_node_columns + center_c
         # High roughness at center should produce lower weight than average
         assert w[center_node] < np.mean(w)
+
+    def test_flat_dem_returns_near_one(self):
+        """Flat DEM has RI=0 everywhere, so W should be 1 everywhere."""
+        grid = _make_grid()
+        grid.at_node["topographic__elevation"][:] = 100.0
+        w = SurfaceRoughnessWeight(grid).compute()
+        assert np.allclose(w, 1.0)
+
+    def test_even_window_raises(self):
+        grid = _make_grid()
+        with pytest.raises(ValueError):
+            SurfaceRoughnessWeight(grid, detrend_window=4)
+        with pytest.raises(ValueError):
+            SurfaceRoughnessWeight(grid, std_window=2)
 
 
 

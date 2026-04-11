@@ -16,7 +16,7 @@ Available components
     NDVI-derived RUSLE C-factor proxy: ``C = (1 − NDVI) / 2``.
 
 ``SurfaceRoughnessWeight``
-    Terrain Ruggedness Index (TRI; Riley et al. 1999) normalised from the DEM.
+    Cavalli-style roughness from DEM residuals and local standard deviation.
 
 ``LandCoverWeight``
     Maps integer land-cover codes to RUSLE C-factor values via a lookup table.
@@ -48,6 +48,24 @@ def _minmax_norm(arr: np.ndarray, fallback: float = 0.5) -> np.ndarray:
     if hi > lo:
         return (arr - lo) / (hi - lo)
     return np.full_like(arr, fallback, dtype=np.float64)
+
+
+def _validate_odd_window(value: int, name: str) -> int:
+    """Validate that a moving-window size is a positive odd integer."""
+    v = int(value)
+    if v < 1 or (v % 2) == 0:
+        raise ValueError(f"{name} must be a positive odd integer (got {value}).")
+    return v
+
+
+def _box_mean_2d(arr: np.ndarray, window: int) -> np.ndarray:
+    """Fast centered moving-window mean using an integral image."""
+    pad = window // 2
+    arr_pad = np.pad(arr, ((pad, pad), (pad, pad)), mode="reflect")
+    ii = np.cumsum(np.cumsum(arr_pad, axis=0), axis=1)
+    ii = np.pad(ii, ((1, 0), (1, 0)), mode="constant")
+    s = ii[window:, window:] - ii[:-window, window:] - ii[window:, :-window] + ii[:-window, :-window]
+    return s / float(window * window)
 
 
 # ---------------------------------------------------------------------------
@@ -147,37 +165,48 @@ class NDVIWeight:
 
 class SurfaceRoughnessWeight:
     """
-    Surface roughness weight derived from the DEM via the Terrain Ruggedness
-    Index (TRI; Riley et al. 1999).
+    Surface roughness weight derived from DEM using the Cavalli et al. (2008)
+    residual-roughness workflow.
 
     .. math::
 
-        \\text{TRI}(i) = \\sqrt{\\sum_{j \\in \\mathcal{N}(i)} (z_j - z_i)^2}
+        z_{avg} = \\text{mean}(z, w_1), \\quad r = z - z_{avg}
 
-    where :math:`\\mathcal{N}(i)` is the 3×3 Moore neighbourhood.  TRI is then
-    min-max normalised to ``[0, 1]`` and inverted to ``[1, 0]`` so that
-    high roughness produces low weight (impedance interpretation).
+    .. math::
+
+        RI = \\text{std}(r, w_2)
+
+    If used as IC weight, RI is normalised as:
+
+    .. math::
+
+        W = 1 - RI / RI_{max}
+
+    Then :math:`W` is clamped to ``[max(w_min, 0.001), 1]`` to avoid zeros in
+    the IC denominator.
 
     **Physical interpretation**
 
     High roughness represents high impedance to sediment transfer. Therefore:
-    * Rough cells receive *low* W, reflecting higher hydraulic roughness
-      that impedes downslope movement.
-    * This impedance-based interpretation aligns physically with resistance
-      or friction effects (follows Cavalli et al. 2013 Appendix roughness proxy).
+    rough cells receive *low* W.
 
     Parameters
     ----------
     grid : RasterModelGrid
         Landlab grid with ``'topographic__elevation'`` at nodes.
+    detrend_window : int, optional
+        Moving-window size for local-mean detrending (operation 1).
+        Must be a positive odd integer. Default ``3``.
+    std_window : int, optional
+        Moving-window size for local standard deviation of the residual
+        (operation 2). Must be a positive odd integer. Default ``3``.
     w_min : float, optional
         Lower clamp.  Default ``0.005``.
 
     References
     ----------
-    Riley, S.J., DeGloria, S.D., & Elliot, R. (1999). A terrain ruggedness
-        index that quantifies topographic heterogeneity. Intermountain Journal
-        of Sciences, 5(1–4), 23–27.
+    Cavalli, M. et al. (2008). A new approach to geomorphometric assessment
+        of spatial sediment connectivity in small Alpine catchments.
     """
 
     name = "roughness"
@@ -185,38 +214,39 @@ class SurfaceRoughnessWeight:
     def __init__(
         self,
         grid,
+        detrend_window: int = 3,
+        std_window: int = 3,
         w_min: float = 0.005,
     ) -> None:
         self._grid = grid
+        self._detrend_window = _validate_odd_window(detrend_window, "detrend_window")
+        self._std_window = _validate_odd_window(std_window, "std_window")
         self._w_min = float(w_min)
 
     def compute(self) -> np.ndarray:
-        """Return TRI-based roughness weight, shape ``(n_nodes,)``."""
+        """Return Cavalli roughness-based weight, shape ``(n_nodes,)``."""
         nrows = self._grid.number_of_node_rows
         ncols = self._grid.number_of_node_columns
         elev = self._grid.at_node["topographic__elevation"].reshape(nrows, ncols)
 
-        tri = np.zeros((nrows, ncols), dtype=np.float64)
-        for dr in (-1, 0, 1):
-            for dc in (-1, 0, 1):
-                if dr == 0 and dc == 0:
-                    continue
-                r0 = max(0, -dr)
-                r1 = nrows - max(0, dr)
-                c0 = max(0, -dc)
-                c1 = ncols - max(0, dc)
-                rn0 = max(0, dr)
-                rn1 = nrows - max(0, -dr)
-                cn0 = max(0, dc)
-                cn1 = ncols - max(0, -dc)
-                diff = elev[r0:r1, c0:c1] - elev[rn0:rn1, cn0:cn1]
-                tri[r0:r1, c0:c1] += diff ** 2
+        # Operation 1: residual from locally averaged DEM.
+        z_avg = _box_mean_2d(elev, self._detrend_window)
+        residual = elev - z_avg
 
-        tri_flat = np.sqrt(tri).ravel()
-        normed = _minmax_norm(tri_flat)
-        # Always invert: high roughness → low W (impedance interpretation)
-        normed = 1.0 - normed
-        return _clamp(normed, self._w_min, 1.0)
+        # Operation 2: local standard deviation of residual surface.
+        r_mean = _box_mean_2d(residual, self._std_window)
+        r2_mean = _box_mean_2d(residual * residual, self._std_window)
+        variance = np.maximum(0.0, r2_mean - (r_mean * r_mean))
+        ri = np.sqrt(variance)
+
+        ri_max = float(np.max(ri))
+        if ri_max > 0.0:
+            w = 1.0 - (ri / ri_max)
+        else:
+            w = np.ones_like(ri, dtype=np.float64)
+
+        floor = max(self._w_min, 0.001)
+        return _clamp(w.ravel(), floor, 1.0)
 
 
 # ---------------------------------------------------------------------------

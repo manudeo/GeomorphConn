@@ -18,7 +18,7 @@ Preset factory functions are also available for common configurations::
 
     from geomorphconn.weights import (
         preset_rainfall_ndvi,           # Dubey, Singh & Jain (submitted)
-        preset_roughness_only,          # TRI from DEM only
+        preset_roughness_only,          # Cavalli roughness from DEM only
         preset_landcover_only,          # RUSLE C-factor from land-cover map
         preset_rainfall_landcover,      # rainfall + land-cover C-factor
         preset_rainfall_ndvi_roughness, # all three combined
@@ -85,10 +85,12 @@ def preset_rainfall_ndvi(
 
 def preset_roughness_only(
     grid,
+    detrend_window: int = 3,
+    std_window: int = 3,
     w_min: float = 0.005,
 ) -> WeightBuilder:
     """
-    DEM-only weight using the Terrain Ruggedness Index (TRI).
+    DEM-only weight using Cavalli roughness index.
 
     Useful when no satellite-derived data is available. High roughness
     produces low weight (impedance interpretation).
@@ -97,11 +99,20 @@ def preset_roughness_only(
     ----------
     grid : RasterModelGrid
         Landlab grid with ``'topographic__elevation'``.
+    detrend_window : int, optional
+        Odd moving-window size for local mean detrending.
+    std_window : int, optional
+        Odd moving-window size for local residual standard deviation.
     w_min : float, optional
         Lower clamp.  Default ``0.005``.
     """
     return WeightBuilder(w_min=w_min).add(
-        SurfaceRoughnessWeight(grid, w_min=w_min)
+        SurfaceRoughnessWeight(
+            grid,
+            detrend_window=detrend_window,
+            std_window=std_window,
+            w_min=w_min,
+        )
     )
 
 
@@ -168,6 +179,8 @@ def preset_rainfall_ndvi_roughness(
     ndvi,
     grid,
     combine: str = "mean",
+    roughness_detrend_window: int = 3,
+    roughness_std_window: int = 3,
     w_min: float = 0.005,
 ) -> WeightBuilder:
     """
@@ -183,6 +196,10 @@ def preset_rainfall_ndvi_roughness(
         Landlab grid with ``'topographic__elevation'``.
     combine : str, optional
         Combination mode.  Default ``'mean'``.
+    roughness_detrend_window : int, optional
+        Odd moving-window size for roughness local mean detrending.
+    roughness_std_window : int, optional
+        Odd moving-window size for roughness local residual standard deviation.
     w_min : float, optional
         Lower clamp.  Default ``0.005``.
     """
@@ -190,5 +207,12 @@ def preset_rainfall_ndvi_roughness(
         WeightBuilder(combine=combine, w_min=w_min)
         .add(RainfallWeight(rainfall, w_min=w_min))
         .add(NDVIWeight(ndvi, w_min=w_min))
-        .add(SurfaceRoughnessWeight(grid, w_min=w_min))
+        .add(
+            SurfaceRoughnessWeight(
+                grid,
+                detrend_window=roughness_detrend_window,
+                std_window=roughness_std_window,
+                w_min=w_min,
+            )
+        )
     )

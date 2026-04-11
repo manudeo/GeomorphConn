@@ -240,6 +240,44 @@ def test_cli_roughness_only_needs_dem_only(tmp_path):
     assert (out_dir / "ic_IC.tif").exists()
 
 
+def test_cli_roughness_even_detrend_window_fails(tmp_path):
+    dem = np.ones((5, 5), dtype=np.float64)
+    dem_p = tmp_path / "dem.tif"
+    _write_tif(dem_p, dem)
+
+    rc = main(
+        [
+            "run",
+            "--dem",
+            str(dem_p),
+            "--weight-factors",
+            "roughness",
+            "--roughness-detrend-window",
+            "4",
+        ]
+    )
+    assert rc == 2
+
+
+def test_cli_roughness_even_std_window_fails(tmp_path):
+    dem = np.ones((5, 5), dtype=np.float64)
+    dem_p = tmp_path / "dem.tif"
+    _write_tif(dem_p, dem)
+
+    rc = main(
+        [
+            "run",
+            "--dem",
+            str(dem_p),
+            "--weight-factors",
+            "roughness",
+            "--roughness-std-window",
+            "6",
+        ]
+    )
+    assert rc == 2
+
+
 def test_cli_missing_selected_factor_input_fails(tmp_path):
     dem = np.ones((5, 5), dtype=np.float64)
     dem_p = tmp_path / "dem.tif"
