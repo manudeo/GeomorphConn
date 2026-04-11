@@ -63,6 +63,7 @@ fast = [
 ]
 gui = [
     "streamlit>=1.30",
+    "charset-normalizer>=3.0",
     "geopandas>=0.13",
     "shapely>=2.0",
     "pyogrio>=0.7",
