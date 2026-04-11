@@ -705,7 +705,32 @@ class ConnectivityIndex(Component):
             ACCfinal[eff_targets] = np.nan
 
         # Optional analysis-domain mask (e.g., keep only main basin in target mode).
-        analysis_mask_bool = routing.get("analysis_mask_bool")
+        explicit_mask_bool = routing.get("explicit_analysis_mask_bool")
+        dominant_mask_bool = routing.get("dominant_basin_mask_bool")
+        analysis_mask_bool = explicit_mask_bool
+
+        if self._main_basin_only:
+            outlet_recv = routing.get("outlet_d8_receivers")
+            ddn_mask = None
+            if outlet_recv is not None:
+                # Derive basin footprint from outlet-style D_dn support using
+                # the original D8 receivers (before target sinks are imposed).
+                ddn_outlet = self._compute_Ddn(
+                    W,
+                    S,
+                    {
+                        "d8_receivers": np.asarray(outlet_recv, dtype=np.int64),
+                        "d8_node_order": routing["d8_node_order"],
+                    },
+                )
+                ddn_mask = np.isfinite(ddn_outlet) & (ddn_outlet > 0.0)
+
+            # Use D_dn-derived footprint when it is discriminative; otherwise
+            # fall back to dominant-outlet basin tracing.
+            if ddn_mask is not None and np.any(ddn_mask) and np.any(~ddn_mask):
+                analysis_mask_bool = ddn_mask if analysis_mask_bool is None else (analysis_mask_bool & ddn_mask)
+            elif dominant_mask_bool is not None:
+                analysis_mask_bool = dominant_mask_bool if analysis_mask_bool is None else (analysis_mask_bool & dominant_mask_bool)
         if analysis_mask_bool is not None:
             outside = ~analysis_mask_bool
             IC[outside] = np.nan
@@ -803,6 +828,7 @@ class ConnectivityIndex(Component):
         fa_d8.run_one_step()
 
         d8_recv   = g_work.at_node["flow__receiver_node"].copy().astype(np.int64)
+        outlet_d8_recv = d8_recv.copy()
         # topographic__steepest_slope is 1-D after D8.
         slope_tan = np.abs(g_work.at_node["topographic__steepest_slope"].copy().ravel())
         d8_order  = g_work.at_node["flow__upstream_node_order"].copy().astype(np.int64)
@@ -839,14 +865,23 @@ class ConnectivityIndex(Component):
                     _terminal(i)
             return visited == int(main_outlet)
 
-        analysis_mask_bool = self._analysis_mask_bool.copy() if self._analysis_mask_bool is not None else None
+        explicit_mask_bool = self._analysis_mask_bool.copy() if self._analysis_mask_bool is not None else None
+        dominant_mask_bool = None
         if self._main_basin_only:
             basin_mask = _dominant_outlet_mask(d8_recv, g_work.at_node["drainage_area"])
             if basin_mask is None or not np.any(basin_mask):
                 raise ValueError("Could not derive a valid outlet-based main basin mask")
-            analysis_mask_bool = basin_mask if analysis_mask_bool is None else (analysis_mask_bool & basin_mask)
-            if not np.any(analysis_mask_bool):
+            dominant_mask_bool = basin_mask
+            if explicit_mask_bool is not None and not np.any(explicit_mask_bool & dominant_mask_bool):
                 raise ValueError("Analysis mask is empty after intersecting with outlet-based main basin")
+
+        target_filter_mask_bool = dominant_mask_bool
+        if explicit_mask_bool is not None:
+            target_filter_mask_bool = (
+                explicit_mask_bool
+                if target_filter_mask_bool is None
+                else (target_filter_mask_bool & explicit_mask_bool)
+            )
 
         # Resolve effective target nodes, starting from vector targets.
         eff_targets = self._target_nodes  # may be None
@@ -855,8 +890,8 @@ class ConnectivityIndex(Component):
             """Merge vector targets with flow-accumulation-derived stream targets."""
             if base_targets is not None:
                 base_targets = np.asarray(base_targets, dtype=np.int64)
-                if analysis_mask_bool is not None:
-                    base_targets = base_targets[analysis_mask_bool[base_targets]]
+                if target_filter_mask_bool is not None:
+                    base_targets = base_targets[target_filter_mask_bool[base_targets]]
                 if base_targets.size == 0:
                     base_targets = None
             if self._stream_threshold is None:
@@ -864,8 +899,8 @@ class ConnectivityIndex(Component):
             cell_area = float(grid.dx) * float(grid.dy)
             cell_count = drainage_area / cell_area
             stream_nodes = np.where(cell_count >= self._stream_threshold)[0].astype(np.int64)
-            if analysis_mask_bool is not None:
-                stream_nodes = stream_nodes[analysis_mask_bool[stream_nodes]]
+            if target_filter_mask_bool is not None:
+                stream_nodes = stream_nodes[target_filter_mask_bool[stream_nodes]]
             if base_targets is not None:
                 return np.unique(np.concatenate([base_targets, stream_nodes]))
             if len(stream_nodes) > 0:
@@ -891,7 +926,9 @@ class ConnectivityIndex(Component):
                 "d8_node_order" : d8_order,
                 "drainage_area" : g_work.at_node["drainage_area"].copy(),
                 "effective_target_nodes": eff_targets,
-                "analysis_mask_bool": analysis_mask_bool,
+                "explicit_analysis_mask_bool": explicit_mask_bool,
+                "dominant_basin_mask_bool": dominant_mask_bool,
+                "outlet_d8_receivers": outlet_d8_recv,
             }
 
         # Stage 2: primary director on a fresh grid with Stage-1 elevation.
@@ -930,7 +967,9 @@ class ConnectivityIndex(Component):
             "d8_node_order" : d8_order,
             "drainage_area" : da2,
             "effective_target_nodes": eff_targets,
-            "analysis_mask_bool": analysis_mask_bool,
+            "explicit_analysis_mask_bool": explicit_mask_bool,
+            "dominant_basin_mask_bool": dominant_mask_bool,
+            "outlet_d8_receivers": outlet_d8_recv,
         }
 
     # Weights

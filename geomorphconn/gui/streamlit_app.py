@@ -848,8 +848,9 @@ def main():
         "Mask out neighbouring basins (dominant outlet only)",
         value=False,
         help=(
-            "If enabled, GeomorphConn automatically derives the dominant outlet basin from the DEM and masks out "
-            "cells that do not drain to that outlet. Useful in Target mode to exclude surrounding small catchments."
+            "If enabled, GeomorphConn derives a basin footprint from outlet-style downstream support "
+            "(Ddn finite domain) and masks out cells outside that basin; if needed, it falls back to dominant-outlet tracing. "
+            "Useful in Target mode to exclude surrounding small catchments."
         ),
     )
 

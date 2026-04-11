@@ -734,8 +734,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--main-basin-only",
         action="store_true",
         help=(
-            "Restrict analysis to the dominant outlet-derived basin (largest D8 outlet basin). "
-            "Useful in target mode to exclude neighbouring catchments without supplying a mask raster."
+            "Restrict analysis to the outlet basin footprint inferred from outlet-style D_dn support "
+            "(with dominant-outlet fallback). Useful in target mode to exclude neighbouring catchments "
+            "without supplying a mask raster."
         ),
     )
     run_p.add_argument(
