@@ -1,24 +1,30 @@
 # ArcGIS Pro Toolbox
 
-This folder contains the latest ArcGIS Pro toolbox build for GeomorphConn-compatible IC workflows.
+This folder contains the ArcGIS Pro toolbox implementation of the GeomorphConn workflows.
 
-## Included file
+## Included toolbox
 
 - ConnectivityTools.atbx
 
-## Tools included in the toolbox
+## Toolset overview
+
+The toolbox provides four model tools:
 
 - ICoutlet
 - ICoutletwithNDVIRFweightCalc
 - ICtarget
 - ICtargetwithNDVIRFweightCalc
 
-## What each tool does
+## Tool descriptions
 
-- ICoutlet: Computes IC toward the basin outlet using provided IC inputs.
-- ICoutletwithNDVIRFweightCalc: First computes W from rainfall and NDVI, then computes outlet-mode IC.
-- ICtarget: Computes IC toward a user-supplied target feature or target raster.
-- ICtargetwithNDVIRFweightCalc: First computes W from rainfall and NDVI, then computes target-mode IC.
+- ICoutlet:
+	Computes Index of Connectivity (IC) toward the basin outlet using supplied DEM and IC inputs.
+- ICoutletwithNDVIRFweightCalc:
+	Computes rainfall-normalized and NDVI-derived weighting, then runs outlet-mode IC.
+- ICtarget:
+	Computes IC toward user-defined target features (for example streams, channels, or other sinks).
+- ICtargetwithNDVIRFweightCalc:
+	Computes rainfall/NDVI weighting first, then runs target-mode IC.
 
 ## Requirements
 
@@ -27,9 +33,16 @@ This folder contains the latest ArcGIS Pro toolbox build for GeomorphConn-compat
 - 3D Analyst extension
 - Image Analyst extension
 
-## Notes
+## Performance tip (ArcGIS Environments)
+
+To speed up calculations, open the tool's **Environments** tab and set **Parallel Processing Factor**
+to a suitable value for your machine (for example `50%`, `75%`, or `100%`).
+
+Use a lower value if your workstation is memory-limited or if multiple heavy GIS processes are running.
+
+## Workflow notes
 
 - ArcGIS models rely on ArcGIS Flow Direction and Flow Accumulation tools.
-- D8 is used for downstream path distance in the ArcGIS workflow.
+- D8 is used for downstream path-distance calculations in this ArcGIS workflow.
 - Weighted tools compute rainfall normalization and NDVI-based C-factor before W.
-- The Python package GeomorphConn provides the same IC formulation using Landlab for scriptable workflows.
+- The Python package GeomorphConn provides the same IC formulation in a scriptable Landlab workflow.
