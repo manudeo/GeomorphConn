@@ -493,6 +493,12 @@ And the NDVI/rainfall hydrological-weight extension used in GeomorphConn:
 
 ---
 
+## Disclaimer
+
+This software is provided "as is", without warranties or guarantees of any kind (express or implied), and the authors are not liable for any direct or indirect damages arising from its use.
+
+---
+
 ## Contributing
 
 Contributions welcome — please open an issue or pull request on GitHub.
