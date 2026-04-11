@@ -219,7 +219,6 @@ GUI output layer meanings:
 - Add a desktop/clickable GUI launcher (double-click icon/shortcut, no terminal required).
 - Add optional SCI-inspired mobility mode (rainfall + soil stability + land use + ruggedness; cf. Zingaro et al., 2019, https://doi.org/10.1016/j.scitotenv.2019.03.461) as an advanced workflow, while keeping the default workflow minimal-data.
 - Add optional IHC-inspired event mode (runoff/CN and antecedent-rainfall weighting with RS-style impedance; cf. Zanandrea et al., 2021, https://doi.org/10.1016/j.catena.2021.105380) as an advanced workflow, while keeping the default workflow minimal-data.
-- Add explicit SCI and IHC citations at each discussion point in README and manuscript so method references are self-explanatory for new readers.
 - Support reading all gridded formats supported by xarray where possible, with clear warnings/errors when extra backend dependencies are required.
 - Add time-series IC mode in GUI and CLI: accept time-varying grids (e.g., NetCDF); if data are single-time or 2D, treat them as static inputs across all requested timesteps.
 - Add SedConnect as a [Landlab](https://landlab.readthedocs.io) component. 
