@@ -437,6 +437,8 @@ with `DepressionFinderAndRouter` and surface roughness impedance weights (Cavall
 
 ## Citation
 
+### Required citations
+
 If you use this software, please cite:
 
 > Singh, M., Cavalli, M. & Crema, S. (2026). GeomorphConn: A Python Package for
@@ -459,15 +461,15 @@ And the NDVI/rainfall hydrological-weight extension used in GeomorphConn:
 
 > Dubey, A., Singh, M., & Jain, V. (in prep.). Understanding Sediment Dynamics in Large River Basins with the Effect of Hydro-sedimentological Connectivity Index.
 
-And a related SCI-based connectivity approach:
+### Related references
+
+These papers provide context and related connectivity approaches but are not required citations for using GeomorphConn:
 
 > Zingaro, M., Refice, A., Giachetta, E., D'Addabbo, A., Lovergine, F., De
 > Pasquale, V., Pepe, G., Brandolini, P., Cevasco, A., & Capolongo, D. (2019).
 > Sediment mobility and connectivity in a catchment: A new mapping approach.
 > *Science of The Total Environment*, 672, 763-775.
 > https://doi.org/10.1016/j.scitotenv.2019.03.461
-
-Related connectivity publications led by M. Singh:
 
 > Singh, M., Tandon, S. K., & Sinha, R. (2017). Assessment of connectivity in a
 > water-stressed wetland (Kaabar Tal) of Kosi-Gandak interfan, north Bihar
