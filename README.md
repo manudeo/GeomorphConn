@@ -463,12 +463,6 @@ And the NDVI/rainfall hydrological-weight extension used in GeomorphConn:
 
 ### Related references
 
-> Zingaro, M., Refice, A., Giachetta, E., D'Addabbo, A., Lovergine, F., De
-> Pasquale, V., Pepe, G., Brandolini, P., Cevasco, A., & Capolongo, D. (2019).
-> Sediment mobility and connectivity in a catchment: A new mapping approach.
-> *Science of The Total Environment*, 672, 763-775.
-> https://doi.org/10.1016/j.scitotenv.2019.03.461
-
 > Singh, M., Tandon, S. K., & Sinha, R. (2017). Assessment of connectivity in a
 > water-stressed wetland (Kaabar Tal) of Kosi-Gandak interfan, north Bihar
 > Plains, India. *Earth Surface Processes and Landforms*, 42(12), 1982-1996.
