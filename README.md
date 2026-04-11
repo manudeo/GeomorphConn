@@ -417,23 +417,24 @@ with `DepressionFinderAndRouter` and surface roughness impedance weights (Cavall
 - Ddn extremely high (up to 86,117 m) in low-connectivity areas
 - IC values are consistently negative in this steep, high-relief basin due to high downstream impedance
 
-#### IC toward 5,000-cell stream network (auto-detected from flow accumulation)
+#### IC toward 1,000-cell stream network (main basin masked)
 
-![IC Target 5k DINF](examples/IC_Target5k_DINF.png)
+![Moscardo Target-Mode IC (main basin masked)](examples/IC_Target5k_DINF.png)
 
 **Parameters:**
 - Flow director: D-infinity
 - Depression handler: DepressionFinderAndRouter
 - Weights: Surface roughness impedance (Cavalli et al. 2008)
-- Target: Auto-detected stream network (cells draining ≥5,000 upslope cells)
+- Main-basin-only masking: Enabled (dominant outlet footprint)
+- Target: Auto-detected stream network (cells draining ≥1,000 upslope cells)
 - Grid: 1,417 rows × 1,833 cols @ 2 m resolution
 
 **IC statistics:**
-- Min / Max: –6.64 / +1.51
-- Mean ± Std: –2.12 ± 1.04
-- Valid cells: 1,269,193 / 2,589,910 (49%)
-- IC range spans negative and positive values, indicating spatially variable connectivity to the stream network
-- Higher IC values in valley bottoms and contributing areas directly connected to streams
+- Min / Max: –6.30 / +1.24
+- Mean ± Std: –1.64 ± 0.93
+- Valid cells: 1,037,176 / 2,589,910 (40%)
+- Main-basin masking removes neighbouring catchments outside the dominant outlet basin
+- IC range remains negative-to-positive, highlighting spatially variable connectivity to the stream network
 
 ---
 
