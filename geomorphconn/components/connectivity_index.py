@@ -105,13 +105,17 @@ def _ddn_d8_py(local_contrib, inv_WS, receivers, node_order):
     """
     Downstream weighted flow-path length (D_dn), D8 only.
     Reverse-topological traversal: outlets first.
+
+    Terminal nodes (outlets / target sinks) get D_dn = inv_WS[node], matching
+    the Borselli (2008) ArcGIS recipe step:
+      ``(([X] == 0) * [inv_CS]) + [X]``
+    which ensures channel/outlet pixels carry their own pixel impedance.
     """
     ddn = local_contrib.copy()
     for node in node_order[::-1]:
         rec = int(receivers[node])
         if rec == node:                 # outlet / imposed sink
-            # Terminal nodes have zero downstream travel distance.
-            ddn[node] = 0.0
+            ddn[node] = inv_WS[node]
         else:
             ddn[node] = local_contrib[node] + ddn[rec]
     return ddn
@@ -150,7 +154,7 @@ if _NUMBA:
             node = node_order[i]
             rec  = receivers[node]
             if rec == node:
-                ddn[node] = 0.0
+                ddn[node] = inv_WS[node]
             else:
                 ddn[node] = local_contrib[node] + ddn[rec]
         return ddn
@@ -294,6 +298,16 @@ class ConnectivityIndex(Component):
         Node IDs of target features (river/lake).  If *None*, IC is
         computed toward the natural basin outlet.  Provide via
         :func:`~GeomorphConn.utils.rasterize_targets`.
+    stream_threshold : int or None, optional
+        Automatically define the channel network from D8 flow accumulation.
+        Every node whose upstream cell count >= *stream_threshold* is treated
+        as a target (channel) node, matching the Borselli (2008) ArcGIS recipe
+        step ``[ACCMASK] <= threshold`` (RIVERMASK).
+
+        * E.g. ``stream_threshold=1000``: pixels draining >= 1000 cells → channel.
+        * Typical range for 30 m grids: 500–2000 for first-order streams.
+        * If *target_nodes* is also given, the two sets are merged (union).
+        * Default *None* — no automatic channel detection.
     fill_sinks : bool, optional
         If *True*, fill depressions explicitly with
         :class:`landlab.components.SinkFillerBarnes` before flow routing.
@@ -420,6 +434,7 @@ class ConnectivityIndex(Component):
         rainfall=None,
         slope=None,
         target_nodes=None,
+        stream_threshold=None,
         fill_sinks: bool = False,
         use_aspect_weighting: bool = False,
         w_min: float = 0.005,
@@ -436,6 +451,7 @@ class ConnectivityIndex(Component):
         self._use_deg_approx = bool(use_degree_approx)
         self._use_aspect_weighting = bool(use_aspect_weighting)
         self._fill_sinks = bool(fill_sinks)
+        self._stream_threshold = int(stream_threshold) if stream_threshold is not None else None
         n = grid.number_of_nodes
 
         # ── Slope (optional user-provided override) ────────────────────
@@ -607,13 +623,14 @@ class ConnectivityIndex(Component):
                 np.nan,
             )
 
-        # In target mode, target cells are terminal masks (NoData in IC maps).
-        if self._target_nodes is not None:
-            IC[self._target_nodes] = np.nan
-            Dup[self._target_nodes] = np.nan
-            Ddn[self._target_nodes] = np.nan
-            Wmean[self._target_nodes] = np.nan
-            Smean[self._target_nodes] = np.nan
+        # In target mode, target/channel cells are masked to NaN in outputs.
+        eff_targets = routing.get("effective_target_nodes")
+        if eff_targets is not None:
+            IC[eff_targets]    = np.nan
+            Dup[eff_targets]   = np.nan
+            Ddn[eff_targets]   = np.nan
+            Wmean[eff_targets] = np.nan
+            Smean[eff_targets] = np.nan
 
         # 6. Write fields
         g = self._grid
@@ -699,23 +716,35 @@ class ConnectivityIndex(Component):
         slope_tan = np.abs(g_work.at_node["topographic__steepest_slope"].copy().ravel())
         d8_order  = g_work.at_node["flow__upstream_node_order"].copy().astype(np.int64)
 
-        if self._target_nodes is not None:
-            d8_recv[self._target_nodes] = self._target_nodes
+        # ── Resolve effective target nodes ─────────────────────────────
+        # Start with any vector-supplied target nodes.
+        eff_targets = self._target_nodes  # may be None
+
+        # Add stream-threshold channel nodes (Borselli RIVERMASK equivalent).
+        if self._stream_threshold is not None:
+            cell_area = float(grid.dx) * float(grid.dy)
+            cell_count = g_work.at_node["drainage_area"] / cell_area
+            stream_nodes = np.where(cell_count >= self._stream_threshold)[0].astype(np.int64)
+            if eff_targets is not None:
+                eff_targets = np.unique(np.concatenate([eff_targets, stream_nodes]))
+            elif len(stream_nodes) > 0:
+                eff_targets = stream_nodes
+
+        # Impose effective targets on D8 receiver array (self-loop = local sink).
+        if eff_targets is not None:
+            d8_recv[eff_targets] = eff_targets
 
         if is_d8:
-            # D8 is also the primary — everything comes from Stage 1
-            if self._target_nodes is not None:
-                recv_1d = d8_recv.copy()
-            else:
-                recv_1d = d8_recv.copy()
+            # D8 is also the primary — everything comes from Stage 1.
             return {
                 "d8_receivers"  : d8_recv,
                 "slope_tan"     : slope_tan,
-                "receivers"     : recv_1d,
+                "receivers"     : d8_recv.copy(),
                 "proportions"   : None,
                 "node_order"    : d8_order,
                 "d8_node_order" : d8_order,
                 "drainage_area" : g_work.at_node["drainage_area"].copy(),
+                "effective_target_nodes": eff_targets,
             }
 
         # ── Stage 2: primary director on a fresh grid ──────────────────
@@ -736,9 +765,9 @@ class ConnectivityIndex(Component):
         da2    = g2.at_node["drainage_area"].copy()
 
         # Impose targets
-        if self._target_nodes is not None:
-            rec2[self._target_nodes, :]  = self._target_nodes[:, None]
-            prop2[self._target_nodes, :] = 0.0
+        if eff_targets is not None:
+            rec2[eff_targets, :]  = eff_targets[:, None]
+            prop2[eff_targets, :] = 0.0
 
         return {
             "d8_receivers"  : d8_recv,
@@ -748,6 +777,7 @@ class ConnectivityIndex(Component):
             "node_order"    : order2,
             "d8_node_order" : d8_order,
             "drainage_area" : da2,
+            "effective_target_nodes": eff_targets,
         }
 
     # ── Weights ───────────────────────────────────────────────────────────────
@@ -796,6 +826,7 @@ class ConnectivityIndex(Component):
         receivers  = routing["receivers"]
         proportions= routing["proportions"]
         DA         = routing["drainage_area"]
+        eff_targets = routing.get("effective_target_nodes")
 
         if proportions is not None:
             eff_props = proportions
@@ -809,7 +840,7 @@ class ConnectivityIndex(Component):
             AccW = _acc_mfd(W, receivers, eff_props, node_order)
             AccS = _acc_mfd(S, receivers, eff_props, node_order)
 
-            if self._use_aspect_weighting or self._target_nodes is not None:
+            if self._use_aspect_weighting or eff_targets is not None:
                 # Recompute contributing-cell count under modified partitioning.
                 AccA = _acc_mfd(np.ones(n_nodes, dtype=np.float64), receivers, eff_props, node_order)
                 ACC_final = np.maximum(AccA + 1.0, 1.0)
@@ -818,7 +849,7 @@ class ConnectivityIndex(Component):
         else:
             AccW = _acc_d8(W, receivers, node_order)
             AccS = _acc_d8(S, receivers, node_order)
-            if self._target_nodes is not None:
+            if eff_targets is not None:
                 # In target mode, drainage_area from Landlab is computed before
                 # target outlets are imposed. Recompute contributing count from
                 # the modified receiver graph so each target acts as terminal.

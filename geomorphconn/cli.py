@@ -296,6 +296,7 @@ def _run_command(args) -> int:
             flow_director=args.flow_director,
             weight=np.flipud(user_weight).ravel(),
             target_nodes=target_nodes,
+            stream_threshold=args.stream_threshold,
             w_min=args.w_min,
             w_max=args.w_max,
             use_degree_approx=args.use_degree_approx,
@@ -323,6 +324,7 @@ def _run_command(args) -> int:
             flow_director=args.flow_director,
             weight=weight_builder,
             target_nodes=target_nodes,
+            stream_threshold=args.stream_threshold,
             w_min=args.w_min,
             w_max=args.w_max,
             use_degree_approx=args.use_degree_approx,
@@ -460,6 +462,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--all-touched",
         action="store_true",
         help="When rasterizing target vectors, mark all touched cells instead of only cell centers",
+    )
+    run_p.add_argument(
+        "--stream-threshold",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Auto-define channel network from D8 flow accumulation: cells where "
+            "upstream cell count >= N are treated as targets (Borselli 2008 recipe). "
+            "Typical values for 30 m grids: 500-2000. "
+            "Can be combined with --target-vector (union is taken)."
+        ),
     )
     run_p.add_argument("--flow-director", default="DINF", choices=["D8", "DINF", "MFD"], help="Upstream flow director")
     run_p.add_argument(

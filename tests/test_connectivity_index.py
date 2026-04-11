@@ -287,8 +287,13 @@ class TestTargetMode:
 
 
 class TestDdnKernel:
-    def test_terminal_node_has_zero_ddn(self):
-        # 0 -> 1 -> 2, with 2 as terminal outlet.
+    def test_terminal_node_ddn_equals_inv_ws(self):
+        """Terminal (outlet/target) gets inv_WS per Borselli (2008) ArcGIS recipe.
+        Chain: 0 -> 1 -> 2 (terminal).
+          ddn[2] = inv_ws[2] = 5.0
+          ddn[1] = dist[1]*inv_ws[1] + ddn[2] = 3.0 + 5.0 = 8.0
+          ddn[0] = dist[0]*inv_ws[0] + ddn[1] = 2.0 + 8.0 = 10.0
+        """
         local = np.array([2.0, 3.0, 0.0], dtype=np.float64)
         inv_ws = np.array([1.0, 1.0, 5.0], dtype=np.float64)
         recv = np.array([1, 2, 2], dtype=np.int64)
@@ -296,9 +301,51 @@ class TestDdnKernel:
 
         ddn = _ddn_d8_py(local, inv_ws, recv, order)
 
-        assert ddn[2] == pytest.approx(0.0)
-        assert ddn[1] == pytest.approx(3.0)
-        assert ddn[0] == pytest.approx(5.0)
+        assert ddn[2] == pytest.approx(5.0)   # terminal = inv_ws
+        assert ddn[1] == pytest.approx(8.0)   # 3.0 + 5.0
+        assert ddn[0] == pytest.approx(10.0)  # 2.0 + 8.0
+
+
+# ---------------------------------------------------------------------------
+# Stream threshold
+# ---------------------------------------------------------------------------
+
+
+class TestStreamThreshold:
+    def test_stream_threshold_produces_different_IC(self):
+        """With a stream threshold, near-channel cells should route to channel."""
+        g1 = _make_grid()
+        g2 = _make_grid()
+        ConnectivityIndex(g1).run_one_step()
+        ConnectivityIndex(g2, stream_threshold=50).run_one_step()
+        assert not np.allclose(
+            g1.at_node["connectivity_index__IC"],
+            g2.at_node["connectivity_index__IC"],
+            equal_nan=True,
+        )
+
+    def test_stream_threshold_masks_channel_cells(self):
+        """Channel cells (acc >= threshold) must be NaN in IC output."""
+        grid = _make_grid()
+        ic = ConnectivityIndex(grid, stream_threshold=20)
+        ic.run_one_step()
+        # At least some cells should be NaN (the channel network)
+        assert np.isnan(ic.IC).any()
+        # And at least some cells should have finite IC (upstream of channel)
+        assert np.isfinite(ic.IC).any()
+
+    def test_stream_threshold_and_target_nodes_merge(self):
+        """Supplying both target_nodes and stream_threshold should take their union."""
+        grid = _make_grid()
+        target = np.array([50, 51, 52], dtype=np.int64)
+        # With threshold, more cells should be NaN than with target nodes alone
+        g1 = _make_grid()
+        g2 = _make_grid()
+        ConnectivityIndex(g1, target_nodes=target).run_one_step()
+        ConnectivityIndex(g2, target_nodes=target, stream_threshold=20).run_one_step()
+        nan1 = np.sum(np.isnan(g1.at_node["connectivity_index__IC"]))
+        nan2 = np.sum(np.isnan(g2.at_node["connectivity_index__IC"]))
+        assert nan2 >= nan1
 
 
 # ---------------------------------------------------------------------------
