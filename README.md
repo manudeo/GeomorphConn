@@ -463,8 +463,6 @@ And the NDVI/rainfall hydrological-weight extension used in GeomorphConn:
 
 ### Related references
 
-These papers provide context and related connectivity approaches but are not required citations for using GeomorphConn:
-
 > Zingaro, M., Refice, A., Giachetta, E., D'Addabbo, A., Lovergine, F., De
 > Pasquale, V., Pepe, G., Brandolini, P., Cevasco, A., & Capolongo, D. (2019).
 > Sediment mobility and connectivity in a catchment: A new mapping approach.
