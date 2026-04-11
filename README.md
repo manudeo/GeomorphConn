@@ -316,7 +316,7 @@ dem, ndvi, rainfall, profile = fetcher.fetch()
 
 ```bash
 earthengine authenticate
-earthengine set_project drylands-aberuni
+earthengine set_project add-your-GEE-project-name
 ```
 
 You can also authenticate from Python:
@@ -324,13 +324,13 @@ You can also authenticate from Python:
 ```python
 import ee
 ee.Authenticate()
-ee.Initialize(project="drylands-aberuni")
+ee.Initialize(project="add-your-GEE-project-name")
 ```
 
 In notebooks, set:
 
 ```python
-GEE_PROJECT = "drylands-aberuni"
+GEE_PROJECT = "add-your-GEE-project-name"
 ```
 
 ---
