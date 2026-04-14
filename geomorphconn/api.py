@@ -17,6 +17,7 @@ from landlab import RasterModelGrid
 from rasterio.enums import Resampling
 
 from .components import ConnectivityIndex
+from .backends import run_connectivity_taudem_arrays
 from .weights import NDVIWeight, RainfallWeight, WeightBuilder
 
 
@@ -134,6 +135,9 @@ def run_connectivity_from_rasters(
     w_min: float = 0.005,
     w_max: float = 1.0,
     weight_combine: str = "mean",
+    compute_backend: str = "landlab",
+    taudem_n_procs: int | None = None,
+    taudem_bin_dir: str | None = None,
     auto_project_to_utm: bool = True,
     ndvi_resampling: Resampling = Resampling.bilinear,
     rainfall_resampling: Resampling = Resampling.bilinear,
@@ -172,6 +176,14 @@ def run_connectivity_from_rasters(
         Optional node-ID mask to keep in outputs.
     main_basin_only : bool, optional
         Restrict outputs to dominant basin footprint.
+    compute_backend : {'landlab', 'taudem'}, optional
+        Routing backend. ``'landlab'`` (default) uses Landlab flow routing.
+        ``'taudem'`` uses external TauDEM executables (D8 path).
+    taudem_n_procs : int or None, optional
+        MPI process count used when ``compute_backend='taudem'``.
+        ``None`` or ``<=0`` lets the backend auto-select CPU count.
+    taudem_bin_dir : str or None, optional
+        Optional directory containing TauDEM executables.
 
     Returns
     -------
@@ -191,6 +203,10 @@ def run_connectivity_from_rasters(
         if mode not in {"outlet", "target"}:
             raise ValueError("ic_mode must be 'outlet' or 'target'")
         target_mode = mode == "target"
+
+        backend = str(compute_backend).strip().lower()
+        if backend not in {"landlab", "taudem"}:
+            raise ValueError("compute_backend must be 'landlab' or 'taudem'")
 
         if target_mode:
             vector_provided = target_vector is not None
@@ -284,51 +300,77 @@ def run_connectivity_from_rasters(
                 buffer_m=target_buffer_m,
             )
 
-        if weight_arr is not None:
-            weight_input = np.flipud(weight_arr).ravel()
+        if backend == "taudem":
+            taudem_out = run_connectivity_taudem_arrays(
+                dem=dem_arr,
+                dem_profile={
+                    "transform": dem_da.rio.transform(),
+                    "crs": dem_da.rio.crs,
+                    "width": int(dem_da.rio.width),
+                    "height": int(dem_da.rio.height),
+                },
+                flow_director=flow_director,
+                ndvi=ndvi_arr,
+                rainfall=rainfall_arr,
+                user_weight=weight_arr,
+                weight_combine=weight_combine,
+                w_min=w_min,
+                w_max=w_max,
+                target_nodes=resolved_target_nodes,
+                analysis_mask_nodes=analysis_mask_nodes,
+                main_basin_only=main_basin_only,
+                stream_threshold=stream_threshold,
+                taudem_n_procs=taudem_n_procs,
+                taudem_bin_dir=taudem_bin_dir,
+            )
+            layers = taudem_out["layers"]
+            ic = None
         else:
-            wb = WeightBuilder(combine=weight_combine, w_min=w_min, w_max=w_max)
-            if rainfall_arr is not None:
-                wb.add(RainfallWeight(np.flipud(rainfall_arr).ravel(), w_min=w_min))
-            if ndvi_arr is not None:
-                wb.add(NDVIWeight(np.flipud(ndvi_arr).ravel(), w_min=w_min))
-            if rainfall_arr is None and ndvi_arr is None:
-                raise ValueError(
-                    "No weight input was provided. Supply precomputed weight, ndvi, rainfall, "
-                    "or weight=[ndvi] / weight=[ndvi, rainfall]."
-                )
-            weight_input = wb
+            if weight_arr is not None:
+                weight_input = np.flipud(weight_arr).ravel()
+            else:
+                wb = WeightBuilder(combine=weight_combine, w_min=w_min, w_max=w_max)
+                if rainfall_arr is not None:
+                    wb.add(RainfallWeight(np.flipud(rainfall_arr).ravel(), w_min=w_min))
+                if ndvi_arr is not None:
+                    wb.add(NDVIWeight(np.flipud(ndvi_arr).ravel(), w_min=w_min))
+                if rainfall_arr is None and ndvi_arr is None:
+                    raise ValueError(
+                        "No weight input was provided. Supply precomputed weight, ndvi, rainfall, "
+                        "or weight=[ndvi] / weight=[ndvi, rainfall]."
+                    )
+                weight_input = wb
 
-        ic = ConnectivityIndex(
-            grid,
-            flow_director=flow_director,
-            weight=weight_input,
-            target_nodes=resolved_target_nodes,
-            analysis_mask_nodes=analysis_mask_nodes,
-            main_basin_only=main_basin_only,
-            stream_threshold=stream_threshold,
-            fill_sinks=fill_sinks,
-            depression_finder=depression_finder,
-            use_aspect_weighting=use_aspect_weighting,
-            w_min=w_min,
-            w_max=w_max,
-        )
-        ic.run_one_step()
+            ic = ConnectivityIndex(
+                grid,
+                flow_director=flow_director,
+                weight=weight_input,
+                target_nodes=resolved_target_nodes,
+                analysis_mask_nodes=analysis_mask_nodes,
+                main_basin_only=main_basin_only,
+                stream_threshold=stream_threshold,
+                fill_sinks=fill_sinks,
+                depression_finder=depression_finder,
+                use_aspect_weighting=use_aspect_weighting,
+                w_min=w_min,
+                w_max=w_max,
+            )
+            ic.run_one_step()
 
-        fields = {
-            "IC": "connectivity_index__IC",
-            "Dup": "connectivity_index__Dup",
-            "Ddn": "connectivity_index__Ddn",
-            "W": "connectivity_index__W",
-            "S": "connectivity_index__S",
-            "Wmean": "connectivity_index__Wmean",
-            "Smean": "connectivity_index__Smean",
-            "ACCfinal": "connectivity_index__ACCfinal",
-        }
-        layers = {
-            key: np.flipud(grid.at_node[field].reshape(dem_arr.shape))
-            for key, field in fields.items()
-        }
+            fields = {
+                "IC": "connectivity_index__IC",
+                "Dup": "connectivity_index__Dup",
+                "Ddn": "connectivity_index__Ddn",
+                "W": "connectivity_index__W",
+                "S": "connectivity_index__S",
+                "Wmean": "connectivity_index__Wmean",
+                "Smean": "connectivity_index__Smean",
+                "ACCfinal": "connectivity_index__ACCfinal",
+            }
+            layers = {
+                key: np.flipud(grid.at_node[field].reshape(dem_arr.shape))
+                for key, field in fields.items()
+            }
         layers_xr = {
             key: _array_to_geoda(dem_da, arr, key)
             for key, arr in layers.items()
@@ -337,6 +379,7 @@ def run_connectivity_from_rasters(
         dataset.attrs.update(
             {
                 "flow_director": flow_director,
+                "compute_backend": backend,
                 "ic_mode": mode,
                 "stream_threshold": int(stream_threshold) if stream_threshold is not None else None,
                 "target_vector_used": bool(target_vector is not None),

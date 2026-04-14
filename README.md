@@ -24,6 +24,7 @@ Earth.
 | **IC toward target** | Compute IC relative to a river/lake shapefile (any geopandas-readable format) |
 | **Hydrological weights** | W = f(RF_norm, NDVI-C-factor) — extends purely topographic/land-cover weighting |
 | **Flow direction options** | D8 (steepest), D-infinity, Multiple-Flow-Direction (MFD) via Landlab |
+| **TauDEM backend (optional)** | External TauDEM+MPI routing backend for outlet/target IC (`compute_backend="taudem"`) |
 | **GEE data fetching** | DEM: SRTM / CopDEM-30 / MERIT-DEM; Rainfall: CHIRPS / ERA5 / PERSIANN; NDVI: Landsat-8/9 / Sentinel-2 |
 | **ArcGIS tools** | Identical workflows provided as an ArcGIS Pro toolbox (`arcgis_tools/`) |
 | **Speed** | Optional `numba` JIT compilation for O(N) traversal loops |
@@ -65,6 +66,18 @@ Detailed documentation is kept in [docs/README.md](docs/README.md) to keep this 
 geomorphconn run --dem dem.tif --ndvi ndvi.tif --rainfall rainfall.tif --outputs IC
 ```
 
+TauDEM backend example:
+
+```bash
+geomorphconn run --dem dem.tif --ndvi ndvi.tif --rainfall rainfall.tif --compute-backend taudem --taudem-n-procs 8 --outputs IC Dup Ddn
+```
+
+TauDEM installation check:
+
+```bash
+geomorphconn taudem-check --taudem-bin-dir "C:\Program Files\TauDEM\TauDEM5Exe"
+```
+
 ### GUI (quick)
 
 ```bash
@@ -102,6 +115,21 @@ result = run_connectivity_from_rasters(
 )
 
 result["dataset"]["IC"].rio.to_raster("IC.tif")
+```
+
+TauDEM backend from API:
+
+```python
+from geomorphconn import run_connectivity_from_rasters
+
+result = run_connectivity_from_rasters(
+    dem="dem.tif",
+    ndvi="ndvi.tif",
+    rainfall="rainfall.tif",
+    compute_backend="taudem",
+    taudem_n_procs=8,
+    taudem_bin_dir=r"C:\Program Files\TauDEM\TauDEM5Exe",
+)
 ```
 
 Detailed guides:

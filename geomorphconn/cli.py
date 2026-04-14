@@ -18,6 +18,8 @@ from rasterio.transform import Affine
 
 from geomorphconn import ConnectivityIndex
 from geomorphconn import __version__ as _PKG_VERSION
+from geomorphconn.backends import check_taudem_installation
+from geomorphconn.backends import run_connectivity_taudem_arrays
 from geomorphconn.weights import NDVIWeight, RainfallWeight, SurfaceRoughnessWeight, WeightBuilder
 
 
@@ -225,6 +227,7 @@ def _write_cli_run_params_txt(
     lines.append(f"Main basin only   : {args.main_basin_only}")
     lines.append("")
     lines.append("--- Parameters ---")
+    lines.append(f"Compute backend   : {args.compute_backend}")
     lines.append(f"Flow director     : {args.flow_director}")
     lines.append(f"Fill sinks        : {args.fill_sinks}")
     lines.append(f"Depression finder : {args.depression_finder}")
@@ -244,6 +247,9 @@ def _write_cli_run_params_txt(
     lines.append(f"Target vector     : {args.target_vector or 'N/A'}")
     lines.append(f"Auto reproject    : {args.auto_reproject}")
     lines.append(f"Reference grid    : {args.reference_grid}")
+    if args.compute_backend == "taudem":
+        lines.append(f"TauDEM processes  : {args.taudem_n_procs}")
+        lines.append(f"TauDEM bin dir    : {args.taudem_bin_dir or 'PATH'}")
     lines.append("")
     lines.append("--- Output grid ---")
     lines.append(f"Grid shape        : {dem_shape[0]} \u00d7 {dem_shape[1]} (rows \u00d7 cols)")
@@ -464,92 +470,135 @@ def _run_command(args) -> int:
         )
     # ─────────────────────────────────────────────────────────────────────────
 
-    if args.depression_finder == "DepressionFinderAndRouter":
+    if args.depression_finder == "DepressionFinderAndRouter" and args.compute_backend == "landlab":
         print(
             "Note: DepressionFinderAndRouter is enabled. This usually improves routing quality "
             "in depressed/flat terrain, but can increase runtime (especially for high-resolution DEMs).",
             flush=True,
         )
 
-    if use_supplied_weight:
-        if user_weight is None:
-            print("Error: weight raster missing after preprocessing.", file=sys.stderr)
-            return 2
-        ic = ConnectivityIndex(
-            grid,
-            flow_director=args.flow_director,
-            weight=np.flipud(user_weight).ravel(),
-            target_nodes=target_nodes,
-            analysis_mask_nodes=analysis_mask_nodes,
-            main_basin_only=args.main_basin_only,
-            stream_threshold=args.stream_threshold,
-            fill_sinks=args.fill_sinks,
-            depression_finder=None if args.depression_finder == "none" else args.depression_finder,
-            w_min=args.w_min,
-            w_max=args.w_max,
-            use_aspect_weighting=args.use_aspect_weighting,
-        )
-    else:
-        weight_builder = WeightBuilder(combine=args.weight_combine, w_min=args.w_min, w_max=args.w_max)
-        if need_rainfall:
-            if rainfall is None:
-                print("Error: rainfall array missing after preprocessing.", file=sys.stderr)
-                return 2
-            weight_builder.add(RainfallWeight(np.flipud(rainfall).ravel(), w_min=args.w_min))
-        if need_ndvi:
-            if ndvi is None:
-                print("Error: NDVI array missing after preprocessing.", file=sys.stderr)
-                return 2
-            weight_builder.add(NDVIWeight(np.flipud(ndvi).ravel(), w_min=args.w_min))
-        if "roughness" in factors:
-            weight_builder.add(
-                SurfaceRoughnessWeight(
-                    grid,
-                    detrend_window=args.roughness_detrend_window,
-                    std_window=args.roughness_std_window,
-                    w_min=args.w_min,
-                )
+    _show_progress(3, total_steps, "Running IC computation")
+    if args.compute_backend == "taudem":
+        if args.use_aspect_weighting:
+            print(
+                "Note: --use-aspect-weighting is ignored for TauDEM backend; TauDEM DINF partitioning is used directly.",
+                flush=True,
+            )
+        if args.fill_sinks or args.depression_finder != "none":
+            print(
+                "Note: TauDEM backend uses TauDEM pit-removed routing; "
+                "Landlab depression options are ignored.",
+                flush=True,
             )
 
-        ic = ConnectivityIndex(
-            grid,
-            flow_director=args.flow_director,
-            weight=weight_builder,
-            target_nodes=target_nodes,
-            analysis_mask_nodes=analysis_mask_nodes,
-            main_basin_only=args.main_basin_only,
-            stream_threshold=args.stream_threshold,
-            fill_sinks=args.fill_sinks,
-            depression_finder=None if args.depression_finder == "none" else args.depression_finder,
-            w_min=args.w_min,
-            w_max=args.w_max,
-            use_aspect_weighting=args.use_aspect_weighting,
-        )
+        try:
+            taudem_out = run_connectivity_taudem_arrays(
+                dem=dem,
+                dem_profile={
+                    "transform": dem_transform,
+                    "crs": dem_crs,
+                    "width": int(dem.shape[1]),
+                    "height": int(dem.shape[0]),
+                },
+                flow_director=args.flow_director,
+                ndvi=ndvi,
+                rainfall=rainfall,
+                user_weight=user_weight,
+                weight_combine=args.weight_combine,
+                w_min=args.w_min,
+                w_max=args.w_max,
+                target_nodes=target_nodes,
+                analysis_mask_nodes=analysis_mask_nodes,
+                main_basin_only=args.main_basin_only,
+                stream_threshold=args.stream_threshold,
+                use_roughness=("roughness" in factors) and (not use_supplied_weight),
+                roughness_detrend_window=args.roughness_detrend_window,
+                roughness_std_window=args.roughness_std_window,
+                taudem_n_procs=args.taudem_n_procs,
+                taudem_bin_dir=args.taudem_bin_dir,
+            )
+            all_layers = taudem_out["layers"]
+        except Exception as exc:
+            print(f"Error (TauDEM backend): {exc}", file=sys.stderr)
+            return 1
+    else:
+        if use_supplied_weight:
+            if user_weight is None:
+                print("Error: weight raster missing after preprocessing.", file=sys.stderr)
+                return 2
+            ic = ConnectivityIndex(
+                grid,
+                flow_director=args.flow_director,
+                weight=np.flipud(user_weight).ravel(),
+                target_nodes=target_nodes,
+                analysis_mask_nodes=analysis_mask_nodes,
+                main_basin_only=args.main_basin_only,
+                stream_threshold=args.stream_threshold,
+                fill_sinks=args.fill_sinks,
+                depression_finder=None if args.depression_finder == "none" else args.depression_finder,
+                w_min=args.w_min,
+                w_max=args.w_max,
+                use_aspect_weighting=args.use_aspect_weighting,
+            )
+        else:
+            weight_builder = WeightBuilder(combine=args.weight_combine, w_min=args.w_min, w_max=args.w_max)
+            if need_rainfall:
+                if rainfall is None:
+                    print("Error: rainfall array missing after preprocessing.", file=sys.stderr)
+                    return 2
+                weight_builder.add(RainfallWeight(np.flipud(rainfall).ravel(), w_min=args.w_min))
+            if need_ndvi:
+                if ndvi is None:
+                    print("Error: NDVI array missing after preprocessing.", file=sys.stderr)
+                    return 2
+                weight_builder.add(NDVIWeight(np.flipud(ndvi).ravel(), w_min=args.w_min))
+            if "roughness" in factors:
+                weight_builder.add(
+                    SurfaceRoughnessWeight(
+                        grid,
+                        detrend_window=args.roughness_detrend_window,
+                        std_window=args.roughness_std_window,
+                        w_min=args.w_min,
+                    )
+                )
 
-    _show_progress(3, total_steps, "Running IC computation")
-    try:
-        ic.run_one_step()
-    except MemoryError:
-        print(
-            "\nMemoryError: not enough contiguous RAM to complete the computation.\n"
-            "  → Rerun with --flow-director D8 (uses ~10% of DINF/MFD memory).\n"
-            "  → Or use the ArcGIS tools in arcgis_tools/ for large areas.\n"
-            "  → See TROUBLESHOOTING.md for a full explanation.",
-            file=sys.stderr,
-        )
-        return 1
+            ic = ConnectivityIndex(
+                grid,
+                flow_director=args.flow_director,
+                weight=weight_builder,
+                target_nodes=target_nodes,
+                analysis_mask_nodes=analysis_mask_nodes,
+                main_basin_only=args.main_basin_only,
+                stream_threshold=args.stream_threshold,
+                fill_sinks=args.fill_sinks,
+                depression_finder=None if args.depression_finder == "none" else args.depression_finder,
+                w_min=args.w_min,
+                w_max=args.w_max,
+                use_aspect_weighting=args.use_aspect_weighting,
+            )
+
+        try:
+            ic.run_one_step()
+        except MemoryError:
+            print(
+                "\nMemoryError: not enough contiguous RAM to complete the computation.\n"
+                "  → Rerun with --flow-director D8 (uses ~10% of DINF/MFD memory).\n"
+                "  → Or use the ArcGIS tools in arcgis_tools/.\n"
+                "  → See TROUBLESHOOTING.md for a full explanation.",
+                file=sys.stderr,
+            )
+            return 1
+
+        all_layers = {
+            key: np.flipud(grid.at_node[field].reshape(dem.shape))
+            for key, field in _FIELD_MAP.items()
+        }
 
     out_dir = Path(args.out_dir)
     outputs = args.outputs
     if "all" in outputs:
         outputs = sorted(_FIELD_MAP.keys())
     _show_progress(4, total_steps, "Writing outputs")
-
-    # Collect all 8 output arrays (for PNG and statistics, regardless of --outputs selection)
-    all_layers: dict = {
-        key: np.flipud(grid.at_node[field].reshape(dem.shape))
-        for key, field in _FIELD_MAP.items()
-    }
 
     # Write only the requested TIFs
     for key in outputs:
@@ -652,6 +701,33 @@ def _gui_command(args) -> int:
 def _welcome_command(_args) -> int:
     _print_welcome()
     return 0
+
+
+def _taudem_check_command(args) -> int:
+    report = check_taudem_installation(args.taudem_bin_dir)
+    print(f"Platform          : {report['platform']}")
+    print(f"WSL detected      : {report['is_wsl']}")
+    print(f"Requested bin dir : {report['requested_bin_dir'] or 'None'}")
+    if report["search_dirs"]:
+        print("Search directories:")
+        for path in report["search_dirs"]:
+            print(f"  - {path}")
+    print("Executable status:")
+    for name, path in report["executables"].items():
+        print(f"  {name:<14}: {path or 'NOT FOUND'}")
+    if report["ok"]:
+        print("\nTauDEM self-check: OK")
+        return 0
+    print("\nTauDEM self-check: FAILED")
+    print("Missing executables:")
+    for name in report["missing"]:
+        print(f"  - {name}")
+    if report["is_wsl"]:
+        print(
+            "\nWSL note: if TauDEM is installed in Windows, pass for example:\n"
+            "  geomorphconn taudem-check --taudem-bin-dir \"/mnt/c/Program Files/TauDEM/TauDEM5Exe\""
+        )
+    return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -774,6 +850,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_p.add_argument("--flow-director", default="DINF", choices=["D8", "DINF", "MFD"], help="Upstream flow director")
     run_p.add_argument(
+        "--compute-backend",
+        default="landlab",
+        choices=["landlab", "taudem"],
+        help="Routing backend: 'landlab' (default) or external TauDEM-based routing",
+    )
+    run_p.add_argument(
+        "--taudem-n-procs",
+        type=int,
+        default=0,
+        help="MPI process count for TauDEM backend (<=0 means auto CPU count)",
+    )
+    run_p.add_argument(
+        "--taudem-bin-dir",
+        default=None,
+        help="Optional directory containing TauDEM executables (PitRemove, D8FlowDir, AreaD8)",
+    )
+    run_p.add_argument(
         "--fill-sinks",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -827,6 +920,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     welcome_p = sub.add_parser("welcome", help="Show welcome/about screen")
     welcome_p.set_defaults(func=_welcome_command)
+
+    taudem_p = sub.add_parser("taudem-check", help="Verify TauDEM and MPI executable availability")
+    taudem_p.add_argument(
+        "--taudem-bin-dir",
+        default=None,
+        help="Optional TauDEM executable directory (Windows or WSL path)",
+    )
+    taudem_p.set_defaults(func=_taudem_check_command)
 
     return parser
 

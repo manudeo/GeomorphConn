@@ -19,6 +19,7 @@ from landlab import RasterModelGrid
 
 from geomorphconn import ConnectivityIndex
 from geomorphconn import __version__ as _PKG_VERSION
+from geomorphconn.backends import run_connectivity_taudem_arrays
 from geomorphconn.weights import NDVIWeight, RainfallWeight, SurfaceRoughnessWeight, WeightBuilder
 
 
@@ -77,6 +78,9 @@ def _build_ic_cache_key(
     ndvi,
     rainfall,
     user_weight,
+    compute_backend,
+    taudem_n_procs,
+    taudem_bin_dir,
     flow_director,
     use_aspect_weighting,
     xy_spacing,
@@ -108,6 +112,9 @@ def _build_ic_cache_key(
         _stable_arr_hash(ndvi),
         _stable_arr_hash(rainfall),
         _stable_arr_hash(user_weight),
+        str(compute_backend),
+        str(int(taudem_n_procs)),
+        str(taudem_bin_dir),
         str(flow_director),
         str(bool(use_aspect_weighting)),
         f"{float(xy_spacing):.12g}",
@@ -132,6 +139,11 @@ def _compute_ic(
     dem,
     ndvi,
     rainfall,
+    compute_backend,
+    taudem_n_procs,
+    taudem_bin_dir,
+    dem_transform,
+    dem_crs,
     flow_director,
     use_aspect_weighting,
     xy_spacing,
@@ -155,6 +167,38 @@ def _compute_ic(
         raise ValueError("DEM and rainfall rasters must have identical shape.")
     if user_weight is not None and dem.shape != user_weight.shape:
         raise ValueError("DEM and user-supplied weight raster must have identical shape.")
+
+    backend = str(compute_backend).strip().lower()
+    if backend not in {"landlab", "taudem"}:
+        raise ValueError("compute_backend must be 'landlab' or 'taudem'")
+
+    if backend == "taudem":
+        taudem_out = run_connectivity_taudem_arrays(
+            dem=dem,
+            dem_profile={
+                "transform": dem_transform,
+                "crs": dem_crs,
+                "width": int(dem.shape[1]),
+                "height": int(dem.shape[0]),
+            },
+            flow_director=flow_director,
+            ndvi=ndvi,
+            rainfall=rainfall,
+            user_weight=user_weight,
+            weight_combine=weight_combine,
+            w_min=w_min,
+            w_max=w_max,
+            target_nodes=target_nodes,
+            analysis_mask_nodes=analysis_mask_nodes,
+            main_basin_only=main_basin_only,
+            stream_threshold=stream_threshold,
+            use_roughness=("roughness" in weight_factors) and (user_weight is None),
+            roughness_detrend_window=int(roughness_detrend_window),
+            roughness_std_window=int(roughness_std_window),
+            taudem_n_procs=taudem_n_procs,
+            taudem_bin_dir=taudem_bin_dir,
+        )
+        return taudem_out["layers"]
 
     grid = RasterModelGrid(dem.shape, xy_spacing=float(xy_spacing))
     grid.add_field("topographic__elevation", np.flipud(dem).ravel(), at="node")
@@ -371,7 +415,10 @@ def _write_gui_run_summary(
     rainfall_file,
     weight_file,
     main_basin_only: bool,
+    compute_backend: str,
     flow_director: str,
+    taudem_n_procs: int,
+    taudem_bin_dir,
     depression_finder,
     fill_sinks: bool,
     weight_factors: list,
@@ -405,7 +452,11 @@ def _write_gui_run_summary(
     lines.append(f"Main basin only   : {main_basin_only}")
     lines.append("")
     lines.append("--- Parameters ---")
+    lines.append(f"Compute backend   : {compute_backend}")
     lines.append(f"Flow director     : {flow_director}")
+    if compute_backend == "taudem":
+        lines.append(f"TauDEM processes  : {taudem_n_procs}")
+        lines.append(f"TauDEM bin dir    : {taudem_bin_dir or 'PATH'}")
     lines.append(f"Depression finder : {depression_finder or 'none'}")
     lines.append(f"Fill sinks        : {fill_sinks}")
     if weight_file is not None:
@@ -681,12 +732,35 @@ def main():
             horizontal=True,
             help="Choose whether IC is computed toward the basin outlet or toward a user-supplied target feature.",
         )
+        compute_backend = st.selectbox(
+            "Compute backend",
+            ["landlab", "taudem"],
+            index=0,
+            help="Choose routing backend. TauDEM can be much faster on large rasters when TauDEM MPI tools are installed.",
+        )
         flow_director = st.selectbox(
             "Flow director",
             ["D8", "DINF", "MFD"],
             index=1,
             help="Routing method used for upstream flow accumulation: D8 = single steepest path, DINF = distributed flow by aspect, MFD = multiple-flow-direction partitioning.",
         )
+        taudem_n_procs = st.number_input(
+            "TauDEM MPI processes",
+            min_value=0,
+            max_value=256,
+            value=0,
+            step=1,
+            help="Used only when backend is taudem. 0 means auto CPU count.",
+            disabled=(compute_backend != "taudem"),
+        )
+        taudem_bin_dir = st.text_input(
+            "TauDEM bin directory (optional)",
+            value="",
+            help="Used only when backend is taudem. Leave empty to resolve executables from PATH. In WSL, a Windows install is often reachable via /mnt/c/Program Files/TauDEM/TauDEM5Exe.",
+            disabled=(compute_backend != "taudem"),
+        )
+        if compute_backend == "taudem" and flow_director == "MFD":
+            st.info("TauDEM backend uses DINF upstream accumulation and D8 downslope flow length. MFD selections fall back to DINF.")
         st.caption("Slope factor uses dy/dx (percent_rise/100) convention.")
         use_supplied_weight = st.checkbox(
             "Use supplied weight raster (W)",
@@ -1114,7 +1188,7 @@ def main():
 
             # DEM size advisory
             n_nodes = dem.size
-            if n_nodes > 5_000_000 and flow_director in ("DINF", "MFD"):
+            if compute_backend == "landlab" and n_nodes > 5_000_000 and flow_director in ("DINF", "MFD"):
                 st.warning(
                     f"Large DEM: {n_nodes:,} nodes ({dem.shape[0]}\u00d7{dem.shape[1]}). "
                     f"DINF/MFD allocate ~{8 * 8 * n_nodes / (1024 ** 3):.1f}\u202fGiB for internal "
@@ -1166,6 +1240,9 @@ def main():
                 ndvi,
                 rainfall,
                 user_weight,
+                compute_backend,
+                int(taudem_n_procs),
+                taudem_bin_dir.strip() if taudem_bin_dir else None,
                 flow_director,
                 use_aspect_weighting,
                 xy_spacing,
@@ -1193,6 +1270,11 @@ def main():
                     dem,
                     ndvi,
                     rainfall,
+                    compute_backend,
+                    int(taudem_n_procs),
+                    taudem_bin_dir.strip() if taudem_bin_dir else None,
+                    save_profile["transform"],
+                    save_profile.get("crs"),
                     flow_director,
                     use_aspect_weighting,
                     xy_spacing,
@@ -1261,6 +1343,22 @@ def main():
                 if suffix:
                     stem = f"{stem}_{suffix}" if output_affix_mode == "suffix" else f"{suffix}_{stem}"
                 _write_output_raster(out_dir / f"{stem}.tif", outputs[key], save_profile)
+
+            # Save the same multi-layer visualization shown in the GUI.
+            fig_stem = "gui_layers"
+            if suffix:
+                fig_stem = (
+                    f"{fig_stem}_{suffix}" if output_affix_mode == "suffix" else f"{suffix}_{fig_stem}"
+                )
+            fig_path = out_dir / f"{fig_stem}.png"
+            try:
+                fig_save = _plot_all_output_layers(outputs)
+                fig_save.savefig(fig_path, dpi=150, bbox_inches="tight")
+                plt.close(fig_save)
+                st.info(f"Saved figure: {fig_path.name}")
+            except Exception as exc:
+                st.warning(f"Could not save PNG figure: {exc}")
+
             ic_stem = "gui_IC"
             if suffix:
                 ic_stem = (
@@ -1275,7 +1373,10 @@ def main():
                     rainfall_file=rainfall_file,
                     weight_file=weight_file,
                     main_basin_only=main_basin_only,
+                    compute_backend=compute_backend,
                     flow_director=flow_director,
+                    taudem_n_procs=int(taudem_n_procs),
+                    taudem_bin_dir=taudem_bin_dir.strip() if taudem_bin_dir else None,
                     depression_finder=depression_finder,
                     fill_sinks=fill_sinks,
                     weight_factors=weight_factors,

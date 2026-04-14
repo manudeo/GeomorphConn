@@ -188,6 +188,45 @@ def test_run_connectivity_target_vector_branch(monkeypatch):
     assert out["dataset"].attrs["target_nodes_count"] == 3
 
 
+def test_run_connectivity_taudem_backend_dispatch(monkeypatch):
+    dem = _make_da(shape=(3, 3), value=120.0)
+    w = _make_da(shape=(3, 3), value=0.7)
+
+    called = {}
+
+    def _fake_taudem(**kwargs):
+        called.update(kwargs)
+        arr = np.ones((3, 3), dtype=np.float64)
+        return {
+            "layers": {
+                "IC": arr,
+                "Dup": arr,
+                "Ddn": arr,
+                "W": arr,
+                "S": arr,
+                "Wmean": arr,
+                "Smean": arr,
+                "ACCfinal": arr,
+            }
+        }
+
+    monkeypatch.setattr(api, "run_connectivity_taudem_arrays", _fake_taudem)
+
+    out = api.run_connectivity_from_rasters(
+        dem=dem,
+        weight=w,
+        compute_backend="taudem",
+        flow_director="D8",
+        taudem_n_procs=4,
+        taudem_bin_dir="C:/fake/taudem",
+    )
+
+    assert out["dataset"].attrs["compute_backend"] == "taudem"
+    assert out["component"] is None
+    assert called["taudem_n_procs"] == 4
+    assert called["taudem_bin_dir"] == "C:/fake/taudem"
+
+
 def test_coarsen_rasters_basic_and_factor_one():
     arr = np.arange(16, dtype=float).reshape(4, 4)
     profile = {

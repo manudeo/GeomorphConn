@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geomorphconn"
-version = "0.1.0"
+version = "0.1.1"
 description = "GeomorphConn: Hydrologically-weighted index of connectivity (IC) with Landlab and Google Earth Engine support"
 readme = "README.md"
 license = { file = "LICENSE" }
