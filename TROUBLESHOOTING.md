@@ -130,6 +130,39 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 This only changes policy for the current shell session.
 
+### Stable TauDEM setup (Windows + WSL + conda)
+
+If TauDEM runs inconsistently on Windows-only Python setups, this pattern is
+usually the most stable:
+
+1. Install TauDEM + Microsoft MPI on Windows (default locations are fine).
+2. Use WSL2 Ubuntu for Python execution.
+3. Create a conda environment inside WSL and install GeomorphConn there.
+4. Point GeomorphConn to the Windows TauDEM binaries via a WSL path.
+
+Example (inside WSL):
+
+```bash
+conda create -n geomorphconn python=3.11 -y
+conda activate geomorphconn
+pip install -e ".[gui]"
+geomorphconn taudem-check --taudem-bin-dir "/mnt/c/Program Files/TauDEM/TauDEM5Exe"
+```
+
+If `ok: True` is reported by `taudem-check`, executable discovery is healthy.
+
+Windows-only health check (PowerShell):
+
+```powershell
+geomorphconn taudem-check --taudem-bin-dir "C:\Program Files\TauDEM\TauDEM5Exe"
+```
+
+Notes:
+- GeomorphConn does not import Python `osgeo.gdal` directly.
+- TauDEM still depends on system GDAL/MPI runtime availability.
+- `taudem-check` is the fastest way to diagnose path/runtime issues before a
+   full IC run.
+
 ## Output issues
 
 ### Target cells are `NaN` in the IC output — is this correct?

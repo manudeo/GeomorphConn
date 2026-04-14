@@ -46,7 +46,7 @@ pip install -e ".[gui]"
 ```
 
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common install, GUI, alignment,
-and target-vector issues.
+and target-vector issues, including a stable Windows + WSL + conda TauDEM setup.
 
 ---
 
