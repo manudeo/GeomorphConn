@@ -350,8 +350,11 @@ class ConnectivityIndex(Component):
         :class:`~landlab.components.FlowAccumulator` via its
         *depression_finder* keyword.  The recommended value is
         ``"DepressionFinderAndRouter"``— it routes flow through depressions
-        without permanently modifying the DEM.  Default is *None* (no special
-        depression handling).  When both *fill_sinks* and *depression_finder*
+        without permanently modifying the DEM. Default is
+        ``"DepressionFinderAndRouter"``.  This often produces better routing
+        quality on pit/flat-prone terrain but can increase runtime,
+        especially for high-resolution DEMs.  When both *fill_sinks* and
+        *depression_finder*
         are enabled, SinkFillerBarnes runs first (Stage 0, modifying the DEM),
         then depression_finder is applied during flow accumulation (Stage 1,
         handling any remaining depressions in the filled DEM).
@@ -493,7 +496,7 @@ class ConnectivityIndex(Component):
         main_basin_only: bool = False,
         stream_threshold=None,
         fill_sinks: bool = False,
-        depression_finder: str | None = None,
+        depression_finder: str | None = "DepressionFinderAndRouter",
         use_aspect_weighting: bool = False,
         w_min: float = 0.005,
         w_max: float = 1.0,
@@ -516,6 +519,13 @@ class ConnectivityIndex(Component):
         # Allow both SinkFillerBarnes and depression_finder to work together:
         # Stage 0 fills sinks (if enabled), then Stage 1 applies depression_finder.
         self._depression_finder = depression_finder
+        if self._depression_finder == "DepressionFinderAndRouter":
+            warnings.warn(
+                "Using DepressionFinderAndRouter: typically better depression handling "
+                "and routing quality, but runtime may increase (especially on high-resolution DEMs).",
+                UserWarning,
+                stacklevel=2,
+            )
         self._stream_threshold = int(stream_threshold) if stream_threshold is not None else None
         self._main_basin_only = bool(main_basin_only)
         n = grid.number_of_nodes

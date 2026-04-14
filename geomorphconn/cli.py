@@ -226,6 +226,7 @@ def _write_cli_run_params_txt(
     lines.append("")
     lines.append("--- Parameters ---")
     lines.append(f"Flow director     : {args.flow_director}")
+    lines.append(f"Fill sinks        : {args.fill_sinks}")
     lines.append(f"Depression finder : {args.depression_finder}")
     if args.weight_raster:
         lines.append("Weight factors    : N/A (supplied weight raster)")
@@ -463,6 +464,13 @@ def _run_command(args) -> int:
         )
     # ─────────────────────────────────────────────────────────────────────────
 
+    if args.depression_finder == "DepressionFinderAndRouter":
+        print(
+            "Note: DepressionFinderAndRouter is enabled. This usually improves routing quality "
+            "in depressed/flat terrain, but can increase runtime (especially for high-resolution DEMs).",
+            flush=True,
+        )
+
     if use_supplied_weight:
         if user_weight is None:
             print("Error: weight raster missing after preprocessing.", file=sys.stderr)
@@ -475,6 +483,7 @@ def _run_command(args) -> int:
             analysis_mask_nodes=analysis_mask_nodes,
             main_basin_only=args.main_basin_only,
             stream_threshold=args.stream_threshold,
+            fill_sinks=args.fill_sinks,
             depression_finder=None if args.depression_finder == "none" else args.depression_finder,
             w_min=args.w_min,
             w_max=args.w_max,
@@ -510,6 +519,7 @@ def _run_command(args) -> int:
             analysis_mask_nodes=analysis_mask_nodes,
             main_basin_only=args.main_basin_only,
             stream_threshold=args.stream_threshold,
+            fill_sinks=args.fill_sinks,
             depression_finder=None if args.depression_finder == "none" else args.depression_finder,
             w_min=args.w_min,
             w_max=args.w_max,
@@ -763,6 +773,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_p.add_argument("--flow-director", default="DINF", choices=["D8", "DINF", "MFD"], help="Upstream flow director")
+    run_p.add_argument(
+        "--fill-sinks",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Apply SinkFillerBarnes before routing to remove pits/flats by modifying DEM elevations. "
+            "Disabled by default."
+        ),
+    )
     run_p.add_argument(
         "--depression-finder",
         default="DepressionFinderAndRouter",

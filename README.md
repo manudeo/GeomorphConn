@@ -184,7 +184,7 @@ Use this quick reference to interpret the main checkbox/toggle options.
 - Slope convention (GUI/CLI): slope is always interpreted as dy/dx, equivalent to ArcGIS/TauDEM `percent_rise / 100`. If you provide an external slope raster/field, provide it in this form.
 - `Use aspect weighting` (GUI) / `--use-aspect-weighting` (CLI): enable TauDEM-style partition weighting for multi-receiver upstream accumulation.
 - `Auto-align rasters` (GUI) / `--auto-reproject` (CLI): align all rasters to a selected reference grid before computation.
-- `Fill sinks before routing (ArcGIS-like)` (GUI): explicitly fill depressions before routing (`Fill -> FlowDirection -> FlowAccumulation`) to better match ArcGIS workflows.
+- `Fill sinks before routing (ArcGIS-like)` (GUI) / `--fill-sinks` (CLI): explicitly fill depressions before routing (`Fill -> FlowDirection -> FlowAccumulation`) to better match ArcGIS workflows. Use `--no-fill-sinks` to disable explicitly.
 - `Reference grid` (GUI/CLI): choose which raster grid (`dem`, `ndvi`, `rainfall`, or `weight`) is used as the alignment target.
 - `Roughness detrend window` / `Roughness std window` (GUI) and `--roughness-detrend-window` / `--roughness-std-window` (CLI): odd moving-window sizes used by the Cavalli roughness method.
 - `w_min` / `w_max` (GUI): lower and upper clamps for weight scaling; GUI now accepts values to 5 decimal places.
@@ -227,6 +227,38 @@ GUI output layer meanings:
 
 ## Quick start
 
+### High-level API — pass rasters directly (path or xarray)
+```python
+from geomorphconn import run_connectivity_from_rasters
+
+result = run_connectivity_from_rasters(
+    dem="dem.tif",
+    weight=["ndvi.tif", "rainfall.tif"],  # shorthand: [ndvi, rainfall]
+    flow_director="DINF",
+    fill_sinks=True,
+    auto_project_to_utm=True,
+)
+
+# Georeferenced xarray outputs
+ds_out = result["dataset"]
+ds_in = result["inputs"]
+
+IC = ds_out["IC"]
+Dup = ds_out["Dup"]
+Ddn = ds_out["Ddn"]
+
+# Save any output layer as GeoTIFF
+IC.rio.to_raster("IC_out.tif")
+```
+
+What this wrapper does internally (same spirit as CLI/GUI):
+
+- accepts DEM/NDVI/rainfall/weight as GeoTIFF path or xarray DataArray
+- auto-checks DEM CRS and (optionally) reprojects geographic DEM to local UTM
+- aligns optional rasters to DEM grid with `reproject_match`
+- builds the Landlab grid and runs `ConnectivityIndex`
+- returns georeferenced xarray `Dataset` outputs and aligned input rasters
+
 ### IC toward outlet — from a GeoTIFF
 ```python
 import numpy as np
@@ -234,6 +266,7 @@ import xarray as xr
 import rioxarray  # registers .rio accessor for GeoTIFF metadata
 from landlab import RasterModelGrid
 from geomorphconn.components import ConnectivityIndex
+from geomorphconn import coarsen_rasters
 
 # Load inputs
 dem_da = xr.load_dataarray("dem.tif").squeeze(drop=True)
@@ -259,6 +292,20 @@ ic = ConnectivityIndex(
 ic.run_one_step()
 
 IC_map = np.flipud(grid.at_node["connectivity_index__IC"].reshape(dem.shape))
+
+# Optional API coarsening (parity with CLI/GUI DEM coarsen factor)
+coarsened, profile2 = coarsen_rasters(
+    {"dem": dem, "ndvi": ndvi, "rainfall": rainfall},
+    factor=2,
+    profile={
+        "transform": dem_da.rio.transform(),
+        "width": dem.shape[1],
+        "height": dem.shape[0],
+    },
+)
+dem2 = coarsened["dem"]
+ndvi2 = coarsened["ndvi"]
+rainfall2 = coarsened["rainfall"]
 ```
 
 ### Optional: TauDEM-style aspect weighting (opt-in)
@@ -307,8 +354,31 @@ fetcher = GEEFetcher(
     scale=30,                             # output resolution in metres
     gee_project="your-gee-project",
 )
+
+# Legacy unpacking still works
 dem, ndvi, rainfall, profile = fetcher.fetch()
+
+# Optional: also return aligned xarray DataArrays
+result = fetcher.fetch(return_xarray=True)
+dem_xr = result["dem_xr"]
+ndvi_xr = result["ndvi_xr"]
+rainfall_xr = result["rainfall_xr"]
 ```
+
+### Fetch a temporal sequence from GEE
+```python
+ts = fetcher.fetch_timeseries(resampling="monthly", return_xarray=False)
+
+dem = ts["dem"]
+profile = ts["profile"]
+periods = ts["periods"]
+
+# each period item has: label, start_date, end_date, ndvi, rainfall
+for p in periods:
+    print(p["label"], p["start_date"], p["end_date"], p["ndvi"].shape)
+```
+
+`resampling` supports `monthly`, `seasonal`, and `annual`.
 
 ### Google Earth Engine authentication (local setup)
 
@@ -351,6 +421,22 @@ These five scenarios are demonstrated in:
 
 - `notebooks/01_IC_outlet_GEE_demo.ipynb` (IC toward outlet)
 - `notebooks/02_IC_target_demo.ipynb` (IC toward target feature)
+- `notebooks/03_IC_software_comparison.ipynb` (cross-software agreement and diagnostics)
+
+Expected output artifacts:
+
+- `notebooks/01_IC_outlet_GEE_demo.ipynb` writes to `output_nb1/`:
+    - `IC_outlet_<scenario>.tif`, `W_<scenario>.tif`, `S_<scenario>.tif`, `Dup_<scenario>.tif`, `Ddn_<scenario>.tif`
+    - `IC_weight_scenarios.png`, `IC_outlet_final.png`, `weight_scenarios_summary.csv`
+- `notebooks/02_IC_target_demo.ipynb` writes to `output_nb2/`:
+    - `IC_outlet_<scenario>.tif`, `IC_target_<scenario>.tif`, `IC_delta_<scenario>.tif`
+    - `W_<scenario>.tif`, `Dup_<scenario>.tif`, `Ddn_<scenario>.tif`
+    - `IC_outlet_vs_target.png`, `weight_scenarios_summary.csv`
+- `notebooks/03_IC_software_comparison.ipynb` writes to `outputs/ic_comparison/`:
+    - `comparison_metrics.csv`, `comparison_tests.csv`
+    - `maps_and_differences.png`, `histograms_and_hexbin.png`, `bland_altman.png`
+    - optional stratified outputs (`stratified_metrics_*.csv`, `stratified_*.png`) if stratification rasters are provided
+    - disconnectivity outputs (`disconnectivity_nodes.csv`, `disconnectivity_links.csv`, `disconnectivity_node_metrics.csv`, related figures)
 
 ---
 
@@ -367,7 +453,8 @@ geomorphconn/
 │       └── target.py               ← Target shapefile rasterization
 ├── notebooks/
 │   ├── 01_IC_outlet_GEE_demo.ipynb ← Full workflow: GEE fetch → IC outlet
-│   └── 02_IC_target_demo.ipynb     ← IC toward river / lake target
+│   ├── 02_IC_target_demo.ipynb     ← IC toward river / lake target
+│   └── 03_IC_software_comparison.ipynb ← sedconn vs ArcGIS vs SedInConnect
 ├── arcgis_tools/
 │   ├── ConnectivityTools.atbx       ← ArcGIS Pro toolbox (outlet + target)
 │   └── README.md

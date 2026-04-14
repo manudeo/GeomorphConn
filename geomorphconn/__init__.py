@@ -24,6 +24,7 @@ Quick start::
 """
 
 from .components import ConnectivityIndex
+from .api import run_connectivity_from_rasters
 from .weights import (
     CustomWeight,
     LandCoverWeight,
@@ -37,10 +38,12 @@ from .weights import (
     preset_rainfall_ndvi_roughness,
     preset_roughness_only,
 )
+from .utils import coarsen_rasters
 
 __version__ = "0.1.0"
 __all__ = [
     "ConnectivityIndex",
+    "run_connectivity_from_rasters",
     "WeightBuilder",
     "RainfallWeight",
     "NDVIWeight",
@@ -52,4 +55,5 @@ __all__ = [
     "preset_landcover_only",
     "preset_rainfall_landcover",
     "preset_rainfall_ndvi_roughness",
+    "coarsen_rasters",
 ]
