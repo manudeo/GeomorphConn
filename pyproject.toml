@@ -97,6 +97,17 @@ include = ["geomorphconn*"]
 testpaths = ["tests"]
 addopts   = "--tb=short -v"
 
+[tool.coverage.run]
+omit = [
+    "geomorphconn/gee/*",
+    "geomorphconn/gui/*",
+    "geomorphconn/analysis/utils/visualization.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+
 [tool.ruff]
 line-length = 88
 select      = ["E", "F", "W", "I"]

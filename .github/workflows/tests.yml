@@ -30,8 +30,8 @@ jobs:
       - name: CLI smoke test (auto-reproject)
         run: python scripts/smoke_cli_reproject.py
 
-      - name: Run tests
-        run: pytest tests/ -v --tb=short
+      - name: Run tests with coverage
+        run: pytest tests/ -v --tb=short --cov=geomorphconn --cov-report=xml --cov-report=term
 
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'

@@ -2,6 +2,7 @@
 
 [![PyPI version](https://badge.fury.io/py/geomorphconn.svg)](https://badge.fury.io/py/geomorphconn)
 [![Tests](https://github.com/manudeo/GeomorphConn/actions/workflows/tests.yml/badge.svg)](https://github.com/manudeo/GeomorphConn/actions)
+[![Coverage](https://codecov.io/gh/manudeo/GeomorphConn/branch/main/graph/badge.svg)](https://codecov.io/gh/manudeo/GeomorphConn)
 [![DOI](https://joss.theoj.org/papers/placeholder/badge.svg)](https://joss.theoj.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
