@@ -26,7 +26,7 @@ Earth.
 | **Flow direction options** | D8 (steepest), D-infinity, Multiple-Flow-Direction (MFD) via Landlab |
 | **TauDEM backend (optional)** | External TauDEM+MPI routing backend for outlet/target IC (`compute_backend="taudem"`) |
 | **GEE data fetching** | DEM: SRTM / CopDEM-30 / MERIT-DEM; Rainfall: CHIRPS / ERA5 / PERSIANN; NDVI: Landsat-8/9 / Sentinel-2 |
-| **ArcGIS tools** | Identical workflows provided as an ArcGIS Pro toolbox (`arcgis_tools/`) |
+| **ArcGIS tools** | Native ArcGIS workflows provided for ArcGIS Pro (`.atbx`) and ArcMap 10.8 (`.tbx`) in `arcgis_tools/` |
 | **Speed** | Optional `numba` JIT compilation for O(N) traversal loops |
 
 ---
@@ -240,6 +240,7 @@ GeomorphConn/
 │   └── 05_IC_timeseries_GEE_demo.ipynb ← Time-series IC demo
 ├── arcgis_tools/
 │   ├── ConnectivityTools.atbx       ← ArcGIS Pro toolbox (outlet + target)
+│   ├── GeomorphConn_ArcGIS_v10.8.0.tbx ← ArcMap 10.8 toolbox
 │   └── README.md
 ├── paper/
 │   ├── paper.md                    ← JOSS manuscript
@@ -255,12 +256,15 @@ GeomorphConn/
 ## ArcGIS tools
 
 For users without a Python/Jupyter workflow, identical IC calculations are provided
-as an ArcGIS Pro toolbox in `arcgis_tools/`. These require ArcGIS Pro
-with Spatial Analyst, 3D Analyst, and Image Analyst licences. See
-[`arcgis_tools/README.md`](arcgis_tools/README.md) for usage instructions.
+as native ArcGIS toolboxes in `arcgis_tools/`:
 
-The ArcGIS toolbox workflow is fully native to ArcGIS Pro and does not depend
-on TauDEM or Landlab.
+- `ConnectivityTools.atbx` for ArcGIS Pro
+- `GeomorphConn_ArcGIS_v10.8.0.tbx` for ArcMap 10.8
+
+The ArcGIS toolbox workflows are fully native to ArcGIS and do not depend on
+TauDEM or Landlab. ArcGIS Pro usage requires Spatial Analyst, 3D Analyst, and
+Image Analyst licences. See [`arcgis_tools/README.md`](arcgis_tools/README.md)
+for usage instructions.
 
 ---
 

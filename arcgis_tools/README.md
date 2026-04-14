@@ -1,10 +1,15 @@
-# ArcGIS Pro Toolbox
+# ArcGIS Toolboxes
 
-This folder contains the ArcGIS Pro toolbox implementation of the GeomorphConn workflows.
+This folder contains native ArcGIS toolbox implementations of the GeomorphConn workflows.
 
 ## Included toolbox
 
 - ConnectivityTools.atbx
+- GeomorphConn_ArcGIS_v10.8.0.tbx
+
+`ConnectivityTools.atbx` targets ArcGIS Pro.
+
+`GeomorphConn_ArcGIS_v10.8.0.tbx` targets ArcMap 10.8.
 
 ## Toolset overview
 
@@ -38,10 +43,10 @@ Roughness reference:
 
 ## Requirements
 
-- ArcGIS Pro 3.x
+- ArcGIS Pro 3.x (for `.atbx`) or ArcMap 10.8 (for `.tbx`)
 - Spatial Analyst extension
 - 3D Analyst extension
-- Image Analyst extension
+- Image Analyst extension (ArcGIS Pro workflow)
 
 ## Performance tip (ArcGIS Environments)
 
