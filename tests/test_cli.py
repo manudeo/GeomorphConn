@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 import rasterio
 from rasterio.transform import from_origin
 
@@ -439,4 +440,68 @@ def test_cli_user_weight_no_reproject_shape_mismatch_fails(tmp_path):
             "--no-auto-reproject",
         ]
     )
+    assert rc == 2
+
+
+def test_cli_taudem_check_ok(monkeypatch, capsys):
+    def _fake_report(_bin_dir):
+        return {
+            "platform": "Windows-11",
+            "is_wsl": False,
+            "requested_bin_dir": None,
+            "search_dirs": [r"C:\\Program Files\\TauDEM\\TauDEM5Exe"],
+            "executables": {
+                "mpiexec": "C:/Program Files/Microsoft MPI/Bin/mpiexec.exe",
+                "PitRemove": "C:/Program Files/TauDEM/TauDEM5Exe/PitRemove.exe",
+                "D8FlowDir": "C:/Program Files/TauDEM/TauDEM5Exe/D8FlowDir.exe",
+                "DinfFlowDir": "C:/Program Files/TauDEM/TauDEM5Exe/DinfFlowDir.exe",
+                "AreaD8": "C:/Program Files/TauDEM/TauDEM5Exe/AreaD8.exe",
+                "AreaDinf": "C:/Program Files/TauDEM/TauDEM5Exe/AreaDinf.exe",
+            },
+            "missing": [],
+            "ok": True,
+        }
+
+    monkeypatch.setattr("geomorphconn.cli.check_taudem_installation", _fake_report)
+    rc = main(["taudem-check"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "TauDEM self-check: OK" in out
+
+
+def test_cli_taudem_check_failure_shows_wsl_note(monkeypatch, capsys):
+    def _fake_report(_bin_dir):
+        return {
+            "platform": "Linux-WSL2",
+            "is_wsl": True,
+            "requested_bin_dir": None,
+            "search_dirs": ["/mnt/c/Program Files/TauDEM/TauDEM5Exe"],
+            "executables": {
+                "mpiexec": None,
+                "PitRemove": None,
+                "D8FlowDir": None,
+                "DinfFlowDir": None,
+                "AreaD8": None,
+                "AreaDinf": None,
+            },
+            "missing": ["mpiexec", "PitRemove"],
+            "ok": False,
+        }
+
+    monkeypatch.setattr("geomorphconn.cli.check_taudem_installation", _fake_report)
+    rc = main(["taudem-check"])
+    out = capsys.readouterr().out
+
+    assert rc == 1
+    assert "TauDEM self-check: FAILED" in out
+    assert "WSL note" in out
+
+
+def test_cli_gui_streamlit_missing_returns_2(monkeypatch):
+    def _raise_file_not_found(_cmd):
+        raise FileNotFoundError("streamlit missing")
+
+    monkeypatch.setattr("geomorphconn.cli.subprocess.call", _raise_file_not_found)
+    rc = main(["gui", "--backend", "streamlit", "--no-show-welcome"])
     assert rc == 2
