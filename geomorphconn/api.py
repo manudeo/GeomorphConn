@@ -119,6 +119,14 @@ def run_connectivity_from_rasters(
     weight: Any = None,
     ndvi: Any = None,
     rainfall: Any = None,
+    ic_mode: str = "outlet",
+    stream_threshold: int | None = None,
+    target_vector: Any = None,
+    target_nodes: Any = None,
+    target_all_touched: bool = True,
+    target_buffer_m: float = 0.0,
+    analysis_mask_nodes: Any = None,
+    main_basin_only: bool = False,
     flow_director: str = "DINF",
     fill_sinks: bool = False,
     depression_finder: str | None = "DepressionFinderAndRouter",
@@ -145,6 +153,25 @@ def run_connectivity_from_rasters(
         - ``weight={"ndvi": ..., "rainfall": ...}``
     ndvi, rainfall : optional
         Optional NDVI/rainfall inputs when not using ``weight`` shorthand.
+    ic_mode : {'outlet', 'target'}, optional
+        ``'outlet'`` computes standard outlet IC. ``'target'`` computes IC
+        toward a target defined by either ``stream_threshold`` or
+        ``target_vector`` (or explicit ``target_nodes``).
+    stream_threshold : int or None, optional
+        In target mode, nodes with upstream area >= threshold are treated as
+        target/channel nodes.
+    target_vector : path or GeoDataFrame, optional
+        In target mode, rasterized to target nodes on the aligned DEM grid.
+    target_nodes : array_like of int, optional
+        Precomputed Landlab node IDs for target mode.
+    target_all_touched : bool, optional
+        Rasterization option for vector target mode.
+    target_buffer_m : float, optional
+        Buffer in metres applied before rasterization for vector targets.
+    analysis_mask_nodes : array_like of int, optional
+        Optional node-ID mask to keep in outputs.
+    main_basin_only : bool, optional
+        Restrict outputs to dominant basin footprint.
 
     Returns
     -------
@@ -159,6 +186,31 @@ def run_connectivity_from_rasters(
     try:
         xr = _require_xarray()
         precomputed_weight, ndvi_in, rainfall_in = _normalize_weight_spec(weight, ndvi, rainfall)
+
+        mode = str(ic_mode).strip().lower()
+        if mode not in {"outlet", "target"}:
+            raise ValueError("ic_mode must be 'outlet' or 'target'")
+        target_mode = mode == "target"
+
+        if target_mode:
+            vector_provided = target_vector is not None
+            threshold_provided = stream_threshold is not None
+            # Keep explicit target_nodes as an advanced option; enforce GUI-like
+            # selection between vector and stream-threshold methods.
+            if vector_provided and threshold_provided:
+                raise ValueError(
+                    "Provide either stream_threshold or target_vector in target mode, not both."
+                )
+            if (target_nodes is None) and (not vector_provided) and (not threshold_provided):
+                raise ValueError(
+                    "Target mode requires one of: target_nodes, target_vector, or stream_threshold."
+                )
+        else:
+            if any(v is not None for v in (stream_threshold, target_vector, target_nodes)):
+                raise ValueError(
+                    "stream_threshold/target_vector/target_nodes were provided, but ic_mode='outlet'. "
+                    "Set ic_mode='target' to use target IC."
+                )
 
         dem_da, dem_opened = _as_dataarray(dem, "dem")
         if dem_opened is not None:
@@ -211,6 +263,27 @@ def run_connectivity_from_rasters(
         grid = RasterModelGrid(dem_arr.shape, xy_spacing=dx)
         grid.add_field("topographic__elevation", np.flipud(dem_arr).ravel(), at="node")
 
+        resolved_target_nodes = None
+        if target_mode and target_nodes is not None:
+            tn = np.asarray(target_nodes, dtype=np.int64).ravel()
+            if tn.size == 0:
+                raise ValueError("target_nodes must not be empty when provided")
+            if np.any(tn < 0) or np.any(tn >= grid.number_of_nodes):
+                raise ValueError("target_nodes contains values outside valid node range")
+            resolved_target_nodes = np.unique(tn)
+
+        if target_mode and (resolved_target_nodes is None) and (target_vector is not None):
+            from .utils import rasterize_targets
+
+            resolved_target_nodes = rasterize_targets(
+                source=target_vector,
+                grid=grid,
+                dem_transform=dem_da.rio.transform(),
+                dem_crs=dem_da.rio.crs,
+                all_touched=target_all_touched,
+                buffer_m=target_buffer_m,
+            )
+
         if weight_arr is not None:
             weight_input = np.flipud(weight_arr).ravel()
         else:
@@ -230,6 +303,10 @@ def run_connectivity_from_rasters(
             grid,
             flow_director=flow_director,
             weight=weight_input,
+            target_nodes=resolved_target_nodes,
+            analysis_mask_nodes=analysis_mask_nodes,
+            main_basin_only=main_basin_only,
+            stream_threshold=stream_threshold,
             fill_sinks=fill_sinks,
             depression_finder=depression_finder,
             use_aspect_weighting=use_aspect_weighting,
@@ -260,6 +337,14 @@ def run_connectivity_from_rasters(
         dataset.attrs.update(
             {
                 "flow_director": flow_director,
+                "ic_mode": mode,
+                "stream_threshold": int(stream_threshold) if stream_threshold is not None else None,
+                "target_vector_used": bool(target_vector is not None),
+                "target_nodes_provided": bool(target_nodes is not None),
+                "target_nodes_count": int(len(resolved_target_nodes)) if resolved_target_nodes is not None else 0,
+                "target_all_touched": bool(target_all_touched),
+                "target_buffer_m": float(target_buffer_m),
+                "main_basin_only": bool(main_basin_only),
                 "fill_sinks": bool(fill_sinks),
                 "depression_finder": depression_finder if depression_finder is not None else "none",
                 "use_aspect_weighting": bool(use_aspect_weighting),

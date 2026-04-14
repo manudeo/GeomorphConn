@@ -48,168 +48,29 @@ and target-vector issues.
 
 ---
 
-## CLI usage
+## Docs map
 
-Show welcome/about information:
+Detailed documentation is kept in [docs/README.md](docs/README.md) to keep this main README concise.
 
-```bash
-geomorphconn welcome
-```
+- Outlet workflow: [docs/outlet.md](docs/outlet.md)
+- Target workflow: [docs/target.md](docs/target.md)
+- CLI usage: [docs/cli.md](docs/cli.md)
+- GUI usage: [docs/gui.md](docs/gui.md)
+- CLI and GUI options reference: [docs/options.md](docs/options.md)
 
-Show installed CLI version:
-
-```bash
-geomorphconn --version
-```
-
-After installation, use the console command:
+### CLI (quick)
 
 ```bash
-geomorphconn run \
-    --dem dem.tif \
-    --ndvi ndvi.tif \
-    --rainfall rainfall.tif \
-    --weight-factors rainfall ndvi roughness \
-    --weight-combine mean \
-    --flow-director DINF \
-    --reference-grid dem \
-    --use-aspect-weighting \
-    --outputs IC Dup Ddn \
-    --out-dir outputs
+geomorphconn run --dem dem.tif --ndvi ndvi.tif --rainfall rainfall.tif --outputs IC
 ```
 
-Current CLI mode uses local raster inputs (`--dem`, `--ndvi`, `--rainfall`).
-Direct GEE-fetch execution from CLI is planned as future work.
-
-If input rasters differ in resolution/extent/shape, CLI now aligns them internally
-using `rioxarray` `reproject_match`, with `--reference-grid` controlling the target
-grid (`dem` by default, or `ndvi` / `rainfall`).
-
-`--weight-factors` lets users choose one, two, or all three factors
-(`rainfall`, `ndvi`, `roughness`).
-For `roughness`, GeomorphConn uses the Cavalli-style residual roughness index:
-1) subtract a local DEM mean (odd `--roughness-detrend-window`),
-2) compute local residual standard deviation (odd `--roughness-std-window`),
-3) convert to weight with $W = 1 - RI/RI_{max}$ and clamp to a positive floor.
-Examples:
-
-- Roughness only (DEM-only):
-
-```bash
-geomorphconn run --dem dem.tif --weight-factors roughness --outputs IC
-```
-
-- Rainfall only:
-
-```bash
-geomorphconn run --dem dem.tif --rainfall rainfall.tif --weight-factors rainfall --outputs IC
-```
-
-- NDVI + rainfall (legacy-equivalent):
-
-```bash
-geomorphconn run --dem dem.tif --ndvi ndvi.tif --rainfall rainfall.tif --weight-factors ndvi rainfall
-```
-
-- User-supplied weight raster (bypass internal factor calculation):
-
-```bash
-geomorphconn run --dem dem.tif --weight-raster weight_w.tif --outputs IC W
-```
-
-Optional target mode:
-
-```bash
-geomorphconn run \
-    --dem dem.tif \
-    --ndvi ndvi.tif \
-    --rainfall rainfall.tif \
-    --target-vector river.shp \
-    --all-touched \
-    --target-buffer 5 \
-    --outputs IC
-```
-
-`--target-vector` accepts any geopandas-readable vector path. For narrow line
-targets, a small automatic buffer is applied if `--target-buffer` is left at
-`0`, so the target rasterizes robustly on the DEM grid.
-
----
-
-## GUI options
-
-Current GUI backend:
-
-- Streamlit app launcher:
+### GUI (quick)
 
 ```bash
 geomorphconn gui --backend streamlit
 ```
 
-This opens a local web UI where you can upload DEM, NDVI, and rainfall GeoTIFFs,
-choose flow settings, and run IC interactively.
-
-The GUI opens with a welcome/about panel summarizing capabilities, references,
-and authors.
-
-GUI upload limit is configured to **4 GB per file** via project Streamlit config
-(`.streamlit/config.toml`, `server.maxUploadSize = 4096`).
-
-GUI includes an **Auto-align rasters** option with the same reference-grid logic
-(`dem` default) to handle mismatched raster grids before IC computation.
-
-GUI also exposes:
-
-- explicit `Outlet` vs `Target` IC mode selection
-- selectable weight factors (`rainfall`, `ndvi`, `roughness`)
-- weight combine mode
-- local target vector path input with native file picker; a `.shp` path works directly when sidecar files are present beside it
-- optional uploaded target vector input (GeoJSON/GPKG or zipped shapefile) for IC toward target mode
-- target buffer and target rasterization controls
-- output directory text field
-- one-click output directory picker (native folder dialog)
-- output name affix with mode selector (suffix/prefix; default is suffix)
-- selectable output layers to save (IC, Dup, Ddn, W, S, Wmean, Smean)
-- optional user-supplied weight (W) raster mode that bypasses internal
-    factor-based weight calculation
-
-Current GUI mode also uses uploaded local rasters.
-Direct GEE-driven GUI workflow is planned as future work.
-
-### Option help (CLI and GUI)
-
-Use this quick reference to interpret the main checkbox/toggle options.
-
-- `Use supplied weight raster (W)` (GUI) / `--weight-raster` (CLI): use a precomputed W raster and skip internal NDVI/rainfall/roughness factor computation. In GUI, NDVI and rainfall inputs are hidden in this mode.
-- Slope convention (GUI/CLI): slope is always interpreted as dy/dx, equivalent to ArcGIS/TauDEM `percent_rise / 100`. If you provide an external slope raster/field, provide it in this form.
-- `Use aspect weighting` (GUI) / `--use-aspect-weighting` (CLI): enable TauDEM-style partition weighting for multi-receiver upstream accumulation.
-- `Auto-align rasters` (GUI) / `--auto-reproject` (CLI): align all rasters to a selected reference grid before computation.
-- `Fill sinks before routing (ArcGIS-like)` (GUI) / `--fill-sinks` (CLI): explicitly fill depressions before routing (`Fill -> FlowDirection -> FlowAccumulation`) to better match ArcGIS workflows. Use `--no-fill-sinks` to disable explicitly.
-- `Reference grid` (GUI/CLI): choose which raster grid (`dem`, `ndvi`, `rainfall`, or `weight`) is used as the alignment target.
-- `Roughness detrend window` / `Roughness std window` (GUI) and `--roughness-detrend-window` / `--roughness-std-window` (CLI): odd moving-window sizes used by the Cavalli roughness method.
-- `w_min` / `w_max` (GUI): lower and upper clamps for weight scaling; GUI now accepts values to 5 decimal places.
-- `IC mode` (GUI): choose `Outlet` for standard basin-outlet IC or `Target` to route IC toward a target defined by either flow accumulation threshold or a vector file.
-- **Target definition method (GUI, Target mode only):** choose one of:
-  - **Flow accumulation threshold:** auto-detect stream/outlet cells based on upstream cell count using the selected flow director algorithm (D8, DINF, or MFD). Typical values: D8=500–2000, DINF/MFD=200–1000 (due to distributed flow).
-  - **Vector file:** supply a vector target (shapefile, GeoJSON, GeoPackage) via local path or upload. Any geopandas-readable format is supported in CLI; GUI supports direct local vector paths plus uploaded GeoJSON/GPKG and zipped shapefiles.
-- `Target vector path` (GUI, vector file mode): local vector file path for target. A `.shp` path is sufficient when its `.dbf`, `.shx`, and other sidecar files are present in the same folder.
-- `Target vector` (GUI upload, vector file mode) / `--target-vector` (CLI): supply a vector target via file upload instead of a local path.
-- `Target buffer` (GUI) / `--target-buffer` (CLI): optional pre-rasterization buffer; if left at `0`, line targets are automatically buffered by about half a cell.
-- `Target rasterization: all touched` (GUI) / `--all-touched` (CLI): include any raster cell touched by the target geometry.
-- Target masking behavior: in target mode, pixels that belong to the target feature are written as `NaN` in IC outputs (treated as terminal mask cells).
-- `Save selected outputs to disk` (GUI): write selected output layers as GeoTIFFs to the chosen output directory.
-- `Output affix mode` (GUI): choose whether output name affix is used as suffix (default) or prefix.
-- Progress feedback: both CLI and GUI now show stage-based run progress (load/preprocess, compute, save).
-
-GUI output layer meanings:
-
-- `IC`: final Index of Connectivity.
-- `Dup`: upstream connectivity component.
-- `Ddn`: downstream impedance component.
-- `W`: effective weight raster used in the run.
-- `S`: slope factor used in the run.
-- `Wmean`: mean upstream weight over the contributing area.
-- `Smean`: mean upstream slope factor over the contributing area.
+For full command and option details, use the docs links above.
 
 ### Future TODOs (planned)
 
@@ -221,164 +82,36 @@ GUI output layer meanings:
 - Add optional IHC-inspired event mode (runoff/CN and antecedent-rainfall weighting with RS-style impedance; cf. Zanandrea et al., 2021, https://doi.org/10.1016/j.catena.2021.105380) as an advanced workflow, while keeping the default workflow minimal-data.
 - Support reading all gridded formats supported by xarray where possible, with clear warnings/errors when extra backend dependencies are required.
 - Add time-series IC mode in GUI and CLI: accept time-varying grids (e.g., NetCDF); if data are single-time or 2D, treat them as static inputs across all requested timesteps.
-- Add SedConnect as a [Landlab](https://landlab.readthedocs.io) component. 
+- Add SedConnect as a [Landlab](https://landlab.readthedocs.io) component.
 
 ---
 
 ## Quick start
-
-### High-level API — pass rasters directly (path or xarray)
+### Fast start (high-level API)
 ```python
 from geomorphconn import run_connectivity_from_rasters
 
 result = run_connectivity_from_rasters(
     dem="dem.tif",
-    weight=["ndvi.tif", "rainfall.tif"],  # shorthand: [ndvi, rainfall]
+    weight=["ndvi.tif", "rainfall.tif"],
+    ic_mode="outlet",   # or "target"
     flow_director="DINF",
     fill_sinks=True,
     auto_project_to_utm=True,
 )
 
-# Georeferenced xarray outputs
-ds_out = result["dataset"]
-ds_in = result["inputs"]
-
-IC = ds_out["IC"]
-Dup = ds_out["Dup"]
-Ddn = ds_out["Ddn"]
-
-# Save any output layer as GeoTIFF
-IC.rio.to_raster("IC_out.tif")
+result["dataset"]["IC"].rio.to_raster("IC.tif")
 ```
 
-What this wrapper does internally (same spirit as CLI/GUI):
+Detailed guides:
 
-- accepts DEM/NDVI/rainfall/weight as GeoTIFF path or xarray DataArray
-- auto-checks DEM CRS and (optionally) reprojects geographic DEM to local UTM
-- aligns optional rasters to DEM grid with `reproject_match`
-- builds the Landlab grid and runs `ConnectivityIndex`
-- returns georeferenced xarray `Dataset` outputs and aligned input rasters
+- Outlet workflow details: [docs/outlet.md](docs/outlet.md)
+- Target workflow details: [docs/target.md](docs/target.md)
 
-### IC toward outlet — from a GeoTIFF
-```python
-import numpy as np
-import xarray as xr
-import rioxarray  # registers .rio accessor for GeoTIFF metadata
-from landlab import RasterModelGrid
-from geomorphconn.components import ConnectivityIndex
-from geomorphconn import coarsen_rasters
+GEE details are also covered in the outlet guide, including:
 
-# Load inputs
-dem_da = xr.load_dataarray("dem.tif").squeeze(drop=True)
-ndvi_da = xr.load_dataarray("ndvi.tif").squeeze(drop=True)
-rainfall_da = xr.load_dataarray("rainfall.tif").squeeze(drop=True)
-
-dem = dem_da.values.astype(float)
-ndvi = ndvi_da.values.astype(float)
-rainfall = rainfall_da.values.astype(float)
-dx = float(abs(dem_da.rio.resolution()[0]))
-
-# Build Landlab grid (flipud: GeoTIFF is top-down, Landlab is bottom-up)
-grid = RasterModelGrid(dem.shape, xy_spacing=dx)
-grid.add_field("topographic__elevation", np.flipud(dem).ravel(), at="node")
-
-# Run IC
-ic = ConnectivityIndex(
-    grid,
-    flow_director="DINF",   # D8 | DINF | MFD
-    ndvi=np.flipud(ndvi).ravel(),
-    rainfall=np.flipud(rainfall).ravel(),
-)
-ic.run_one_step()
-
-IC_map = np.flipud(grid.at_node["connectivity_index__IC"].reshape(dem.shape))
-
-# Optional API coarsening (parity with CLI/GUI DEM coarsen factor)
-coarsened, profile2 = coarsen_rasters(
-    {"dem": dem, "ndvi": ndvi, "rainfall": rainfall},
-    factor=2,
-    profile={
-        "transform": dem_da.rio.transform(),
-        "width": dem.shape[1],
-        "height": dem.shape[0],
-    },
-)
-dem2 = coarsened["dem"]
-ndvi2 = coarsened["ndvi"]
-rainfall2 = coarsened["rainfall"]
-```
-
-### Optional: TauDEM-style aspect weighting (opt-in)
-```python
-ic = ConnectivityIndex(
-    grid,
-    flow_director="DINF",
-    ndvi=np.flipud(ndvi).ravel(),
-    rainfall=np.flipud(rainfall).ravel(),
-    use_aspect_weighting=True,  # default is False
-)
-ic.run_one_step()
-```
-
-`use_aspect_weighting` is disabled by default to preserve existing behavior.
-When enabled, it only affects multi-receiver upstream accumulation
-(`DINF` / `MFD`) in `D_up`; `D_dn` remains D8-based.
-
-### IC toward a river shapefile
-```python
-from geomorphconn.utils import rasterize_targets
-
-target_nodes = rasterize_targets("river.shp", grid, dem_transform=dem_da.rio.transform())
-
-ic = ConnectivityIndex(
-    grid,
-    ndvi=np.flipud(ndvi).ravel(),
-    rainfall=np.flipud(rainfall).ravel(),
-    target_nodes=target_nodes,
-)
-ic.run_one_step()
-```
-
-### Fetch all inputs from Google Earth Engine
-```python
-from geomorphconn.gee import GEEFetcher
-
-fetcher = GEEFetcher(
-    bounds=(72.5, 28.0, 80.5, 32.0),     # (lon_min, lat_min, lon_max, lat_max)
-    # or: bounds="catchment.shp"
-    dem_source="COPDEM30",                # SRTM | COPDEM30 | MERIT
-    rainfall_source="CHIRPS",             # CHIRPS | ERA5 | PERSIANN
-    ndvi_source="SENTINEL2",              # SENTINEL2 | LANDSAT8 | LANDSAT9
-    start_date="2020-06-01",
-    end_date="2020-08-31",                # median NDVI over this period
-    scale=30,                             # output resolution in metres
-    gee_project="your-gee-project",
-)
-
-# Legacy unpacking still works
-dem, ndvi, rainfall, profile = fetcher.fetch()
-
-# Optional: also return aligned xarray DataArrays
-result = fetcher.fetch(return_xarray=True)
-dem_xr = result["dem_xr"]
-ndvi_xr = result["ndvi_xr"]
-rainfall_xr = result["rainfall_xr"]
-```
-
-### Fetch a temporal sequence from GEE
-```python
-ts = fetcher.fetch_timeseries(resampling="monthly", return_xarray=False)
-
-dem = ts["dem"]
-profile = ts["profile"]
-periods = ts["periods"]
-
-# each period item has: label, start_date, end_date, ndvi, rainfall
-for p in periods:
-    print(p["label"], p["start_date"], p["end_date"], p["ndvi"].shape)
-```
-
-`resampling` supports `monthly`, `seasonal`, and `annual`.
+- `GEEFetcher.fetch(return_xarray=True)`
+- `GEEFetcher.fetch_timeseries(resampling="monthly" | "seasonal" | "annual")`
 
 ### Google Earth Engine authentication (local setup)
 
