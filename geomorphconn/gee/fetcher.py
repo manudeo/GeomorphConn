@@ -103,7 +103,8 @@ _RAINFALL_CATALOGUE = {
         "asset"  : "ECMWF/ERA5_LAND/MONTHLY_AGGR",
         "band"   : "total_precipitation_sum",
         "type"   : "image_collection",
-        "agg"    : "mean",    # mean monthly over period
+        "agg"    : "sum",     # sum monthly totals over period
+        "unit_factor": 1000.0, # ERA5-Land total_precipitation_sum is in meters; convert to mm
         "scale"  : 11132,
         "desc"   : "ERA5-Land monthly total precipitation (~11 km)",
     },
@@ -173,14 +174,6 @@ _LANDCOVER_CATALOGUE = {
         "scale"  : 500,
         "desc"   : "MODIS MCD12Q1 Land Cover Type 1 IGBP (500 m)",
         "c_table": "MODIS_IGBP_C_FACTOR",
-    },
-    "CORINE": {
-        "asset"  : "COPERNICUS/CORINE/V20/100m",
-        "band"   : "landcover",
-        "type"   : "image",
-        "scale"  : 100,
-        "desc"   : "CORINE Land Cover 2018 (100 m, Europe only)",
-        "c_table": "CORINE_C_FACTOR",
     },
 }
 
@@ -1187,6 +1180,11 @@ class GEEFetcher:
         arr, _, _, _ = self._to_2d_yx(ds[band])
         arr = arr.astype(np.float64)
         arr[arr < 0] = np.nan
+
+        # Convert source units where needed before resampling/alignment.
+        factor = float(cfg.get("unit_factor", 1.0))
+        if factor != 1.0:
+            arr = arr * factor
 
         # Resample to DEM grid
         arr = self._match_grid(arr, ref_profile)

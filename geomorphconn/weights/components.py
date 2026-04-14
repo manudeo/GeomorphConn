@@ -68,6 +68,51 @@ def _box_mean_2d(arr: np.ndarray, window: int) -> np.ndarray:
     return s / float(window * window)
 
 
+def compute_surface_roughness_weight_2d(
+    elev_2d: np.ndarray,
+    detrend_window: int = 3,
+    std_window: int = 3,
+    w_min: float = 0.005,
+) -> np.ndarray:
+    """Compute Cavalli roughness-derived weight from a 2-D DEM.
+
+    Uses xarray rolling windows when available, with a NumPy fallback.
+    Returns a 2-D weight array in geographic row/column order.
+    """
+    detrend_window = _validate_odd_window(detrend_window, "detrend_window")
+    std_window = _validate_odd_window(std_window, "std_window")
+
+    elev = np.asarray(elev_2d, dtype=np.float64)
+    if elev.ndim != 2:
+        raise ValueError("elev_2d must be a 2-D array")
+
+    try:
+        import xarray as xr
+
+        da = xr.DataArray(elev, dims=("y", "x"))
+        z_avg = da.rolling(y=detrend_window, x=detrend_window, center=True, min_periods=1).mean()
+        residual = da - z_avg
+        ri = residual.rolling(y=std_window, x=std_window, center=True, min_periods=1).std(ddof=0)
+        ri_arr = np.asarray(ri.values, dtype=np.float64)
+    except Exception:
+        z_avg = _box_mean_2d(elev, detrend_window)
+        residual = elev - z_avg
+        r_mean = _box_mean_2d(residual, std_window)
+        r2_mean = _box_mean_2d(residual * residual, std_window)
+        variance = np.maximum(0.0, r2_mean - (r_mean * r_mean))
+        ri_arr = np.sqrt(variance)
+
+    valid = ri_arr[np.isfinite(ri_arr)]
+    ri_max = float(np.max(valid)) if valid.size > 0 else 0.0
+    if ri_max > 0.0:
+        w = 1.0 - (ri_arr / ri_max)
+    else:
+        w = np.ones_like(ri_arr, dtype=np.float64)
+
+    floor = max(float(w_min), 0.001)
+    return _clamp(w, floor, 1.0)
+
+
 # ---------------------------------------------------------------------------
 # RainfallWeight
 # ---------------------------------------------------------------------------
@@ -230,25 +275,13 @@ class SurfaceRoughnessWeight:
         nrows = self._grid.number_of_node_rows
         ncols = self._grid.number_of_node_columns
         elev = self._grid.at_node["topographic__elevation"].reshape(nrows, ncols)
-
-        # Operation 1: residual from locally averaged DEM.
-        z_avg = _box_mean_2d(elev, self._detrend_window)
-        residual = elev - z_avg
-
-        # Operation 2: local standard deviation of residual surface.
-        r_mean = _box_mean_2d(residual, self._std_window)
-        r2_mean = _box_mean_2d(residual * residual, self._std_window)
-        variance = np.maximum(0.0, r2_mean - (r_mean * r_mean))
-        ri = np.sqrt(variance)
-
-        ri_max = float(np.max(ri))
-        if ri_max > 0.0:
-            w = 1.0 - (ri / ri_max)
-        else:
-            w = np.ones_like(ri, dtype=np.float64)
-
-        floor = max(self._w_min, 0.001)
-        return _clamp(w.ravel(), floor, 1.0)
+        w = compute_surface_roughness_weight_2d(
+            elev,
+            detrend_window=self._detrend_window,
+            std_window=self._std_window,
+            w_min=self._w_min,
+        )
+        return np.asarray(w, dtype=np.float64).ravel()
 
 
 # ---------------------------------------------------------------------------
