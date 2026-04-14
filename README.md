@@ -176,18 +176,27 @@ Expected output artifacts:
 ## Repository structure
 
 ```
-geomorphconn/
-├── geomorphconn/                   # new canonical import path
+GeomorphConn/
+├── geomorphconn/                   # Package source
 │   ├── components/
 │   │   └── connectivity_index.py   ← Landlab Component (core algorithm)
 │   ├── gee/
 │   │   └── fetcher.py              ← GEE/xee data fetcher
-│   └── utils/
-│       └── target.py               ← Target shapefile rasterization
+│   ├── utils/
+│   │   └── target.py               ← Target shapefile rasterization
+│   └── weights/
+│       └── builder.py, components.py, tables.py
+├── docs/                           # Documentation and examples
+│   ├── README.md                   ← Docs index
+│   ├── outlet.md, target.md, cli.md, gui.md, options.md
+│   └── assets/
+│       ├── geomorphconn_GUI.pdf    ← GUI reference
+│       ├── IC_Outlet_DINF.png      ← Moscardo outlet example
+│       └── IC_Target5k_DINF.png    ← Moscardo target example
 ├── notebooks/
 │   ├── 01_IC_outlet_GEE_demo.ipynb ← Full workflow: GEE fetch → IC outlet
 │   ├── 02_IC_target_demo.ipynb     ← IC toward river / lake target
-│   └── 03_IC_software_comparison.ipynb ← sedconn vs ArcGIS vs SedInConnect
+│   └── 03_IC_software_comparison.ipynb ← Outlet vs target vs ArcGIS
 ├── arcgis_tools/
 │   ├── ConnectivityTools.atbx       ← ArcGIS Pro toolbox (outlet + target)
 │   └── README.md
@@ -221,7 +230,7 @@ with `DepressionFinderAndRouter` and surface roughness impedance weights (Cavall
 
 #### IC toward outlet (no target constraint)
 
-![IC Outlet DINF](examples/IC_Outlet_DINF.png)
+![IC Outlet DINF](docs/assets/IC_Outlet_DINF.png)
 
 **Parameters:**
 - Flow director: D-infinity (distributed multi-receiver flow)
@@ -239,7 +248,7 @@ with `DepressionFinderAndRouter` and surface roughness impedance weights (Cavall
 
 #### IC toward 1,000-cell stream network (main basin masked)
 
-![Moscardo Target-Mode IC (main basin masked)](examples/IC_Target5k_DINF.png)
+![Moscardo Target-Mode IC (main basin masked)](docs/assets/IC_Target5k_DINF.png)
 
 **Parameters:**
 - Flow director: D-infinity
