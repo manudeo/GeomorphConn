@@ -16,13 +16,9 @@ The GUI supports:
 
 ## GUI example reference
 
-A saved GUI HTML example is available in this repository:
+A saved GUI page export is available as a PDF:
 
-- [../GeomorphConn GUI.htm](../GeomorphConn GUI.htm)
-
-If opened from docs, you may also need the sibling assets folder:
-
-- [../GeomorphConn GUI_files](../GeomorphConn%20GUI_files)
+- [assets/GeomorphConn_GUI.pdf](assets/GeomorphConn_GUI.pdf)
 
 ## Notes
 
