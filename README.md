@@ -179,11 +179,17 @@ GEE_PROJECT = "add-your-GEE-project-name"
 | `ndvi_rainfall` | NDVI + Rainfall | `preset_rainfall_ndvi(rainfall_nodes, ndvi_nodes)` |
 | `ndvi_rainfall_roughness` | NDVI + Rainfall + DEM roughness | `preset_rainfall_ndvi_roughness(rainfall_nodes, ndvi_nodes, grid)` |
 
-These five scenarios are demonstrated in:
+These five scenarios are demonstrated across the first three notebooks below
+(not one scenario per notebook):
 
 - `notebooks/01_IC_outlet_GEE_demo.ipynb` (IC toward outlet)
 - `notebooks/02_IC_target_demo.ipynb` (IC toward target feature)
 - `notebooks/03_IC_software_comparison.ipynb` (cross-software agreement and diagnostics)
+
+Additional notebooks:
+
+- `notebooks/04_GEE_all_sources_moscardo.ipynb` (GEE source matrix diagnostics)
+- `notebooks/05_IC_timeseries_GEE_demo.ipynb` (time-series IC workflow)
 
 Expected output artifacts:
 
@@ -207,10 +213,14 @@ Expected output artifacts:
 ```
 GeomorphConn/
 ├── geomorphconn/                   # Package source
+│   ├── backends/
+│   │   └── taudem.py               ← Optional TauDEM backend integration
 │   ├── components/
 │   │   └── connectivity_index.py   ← Landlab Component (core algorithm)
 │   ├── gee/
 │   │   └── fetcher.py              ← GEE/xee data fetcher
+│   ├── analysis/
+│   │   └── cru_dynamics.py, disconnectivity.py
 │   ├── utils/
 │   │   └── target.py               ← Target shapefile rasterization
 │   └── weights/
@@ -219,13 +229,15 @@ GeomorphConn/
 │   ├── README.md                   ← Docs index
 │   ├── outlet.md, target.md, cli.md, gui.md, options.md
 │   └── assets/
-│       ├── geomorphconn_GUI.pdf    ← GUI reference
+│       ├── GeomorphConn_GUI.pdf    ← GUI reference
 │       ├── IC_Outlet_DINF.png      ← Moscardo outlet example
 │       └── IC_Target5k_DINF.png    ← Moscardo target example
 ├── notebooks/
 │   ├── 01_IC_outlet_GEE_demo.ipynb ← Full workflow: GEE fetch → IC outlet
 │   ├── 02_IC_target_demo.ipynb     ← IC toward river / lake target
-│   └── 03_IC_software_comparison.ipynb ← Outlet vs target vs ArcGIS
+│   ├── 03_IC_software_comparison.ipynb ← Outlet vs target vs ArcGIS
+│   ├── 04_GEE_all_sources_moscardo.ipynb ← GEE source matrix diagnostics
+│   └── 05_IC_timeseries_GEE_demo.ipynb ← Time-series IC demo
 ├── arcgis_tools/
 │   ├── ConnectivityTools.atbx       ← ArcGIS Pro toolbox (outlet + target)
 │   └── README.md
@@ -233,7 +245,9 @@ GeomorphConn/
 │   ├── paper.md                    ← JOSS manuscript
 │   └── paper.bib
 └── tests/
-    └── test_connectivity_index.py
+    ├── test_connectivity_index.py
+    ├── test_cli.py, test_api_utils.py, test_taudem_backend.py
+    └── test_target_utils.py, test_cru_dynamics.py, test_disconnectivity.py
 ```
 
 ---
