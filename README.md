@@ -259,6 +259,9 @@ as an ArcGIS Pro toolbox in `arcgis_tools/`. These require ArcGIS Pro
 with Spatial Analyst, 3D Analyst, and Image Analyst licences. See
 [`arcgis_tools/README.md`](arcgis_tools/README.md) for usage instructions.
 
+The ArcGIS toolbox workflow is fully native to ArcGIS Pro and does not depend
+on TauDEM or Landlab.
+
 ---
 
 ## Example Results
