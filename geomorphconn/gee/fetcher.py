@@ -24,6 +24,10 @@ NDVI
     ``'SENTINEL2'`` — Sentinel-2 Level-2A SR, 10–20 m, 2017–present
     ``'LANDSAT8'``  — Landsat 8 Collection 2 SR, 30 m, 2013–present
     ``'LANDSAT9'``  — Landsat 9 Collection 2 SR, 30 m, 2021–present
+    ``'LANDSAT7'``  — Landsat 7 Collection 2 SR (SLC-on only), 30 m, 1999–2003-05-30
+    ``'LANDSAT5'``  — Landsat 5 TM Collection 2 SR, 30 m, 1984–2013
+    ``'LANDSATALL'``— All Landsat C2 SR sensors merged (L5+L7 SLC-on+L8+L9), 30 m,
+                      1984–present. Recommended for multi-decadal IC time series.
 
 Dependencies
 ------------
@@ -146,6 +150,34 @@ _NDVI_CATALOGUE = {
         "scale"        : 30,
         "desc"         : "Landsat 9 Collection 2 SR (~30 m)",
     },
+    # Landsat 7 ETM+: SLC failed 2003-05-31; restrict to SLC-on data only.
+    "LANDSAT7": {
+        "asset"        : "LANDSAT/LE07/C02/T1_L2",
+        "nir_band"     : "SR_B4",
+        "red_band"     : "SR_B3",
+        "cloud_band"   : "QA_PIXEL",
+        "cloud_thresh" : None,
+        "scale"        : 30,
+        "desc"         : "Landsat 7 ETM+ Collection 2 SR, SLC-on only (~30 m, up to 2003-05-30)",
+        "slc_cutoff_end": "2003-05-30",  # SLC failed 2003-05-31; data after this has scan-line gaps
+    },
+    "LANDSAT5": {
+        "asset"        : "LANDSAT/LT05/C02/T1_L2",
+        "nir_band"     : "SR_B4",
+        "red_band"     : "SR_B3",
+        "cloud_band"   : "QA_PIXEL",
+        "cloud_thresh" : None,
+        "scale"        : 30,
+        "desc"         : "Landsat 5 TM Collection 2 SR (~30 m, 1984–2013)",
+    },
+    # Merged collection: all Landsat C2 SR sensors, Landsat 7 SLC-on only.
+    # NIR/Red differ between TM (B4/B3) and OLI (B5/B4); handled in _fetch_ndvi.
+    "LANDSATALL": {
+        "type"    : "merged",
+        "scale"   : 30,
+        "desc"    : "All Landsat C2 SR merged (L5 TM + L7 ETM+ SLC-on + L8 OLI + L9 OLI-2), 30 m, 1984–present",
+        "sensors" : ["LANDSAT5", "LANDSAT7", "LANDSAT8", "LANDSAT9"],
+    },
 }
 
 
@@ -222,7 +254,10 @@ class GEEFetcher:
         Rainfall dataset. One of ``'CHIRPS'``, ``'ERA5'``, ``'PERSIANN'``.
         Default: ``'CHIRPS'``.
     ndvi_source : str, optional
-        NDVI dataset. One of ``'SENTINEL2'``, ``'LANDSAT8'``, ``'LANDSAT9'``.
+        NDVI dataset. One of ``'SENTINEL2'``, ``'LANDSAT9'``, ``'LANDSAT8'``,
+        ``'LANDSAT7'`` (SLC-on only, ≤ 2003-05-30), ``'LANDSAT5'``, or
+        ``'LANDSATALL'`` (all Landsat sensors merged; best for multi-decadal
+        IC time series).
         Default: ``'SENTINEL2'``.
     start_date : str, optional
         ISO date string ``'YYYY-MM-DD'`` for the start of the NDVI/rainfall
@@ -1013,6 +1048,55 @@ class GEEFetcher:
         da.attrs["transform"] = tuple(tr)
         return da
 
+    @staticmethod
+    def _open_dataset_safe(
+        xr,
+        ee_obj,
+        geometry,
+        scale,
+        crs,
+        dataset_label: str,
+    ):
+        """
+        Open an Earth Engine object via xee and return xarray.Dataset.
+
+        Returns None when xee reports an empty collection/band payload for the
+        requested window (common in sparse temporal windows), allowing callers
+        to provide graceful NaN/nodata fallbacks.
+        """
+        import xee  # noqa
+
+        try:
+            ds = xr.open_dataset(
+                ee_obj,
+                engine="ee",
+                geometry=geometry,
+                scale=scale,
+                crs=crs,
+            )
+        except Exception as exc:
+            msg = str(exc)
+            if "max() arg is an empty sequence" in msg or "empty sequence" in msg.lower():
+                warnings.warn(
+                    f"GEE/xee returned no imagery for {dataset_label}. "
+                    "Returning an empty raster fallback for this window.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                return None
+            raise
+
+        if len(ds.data_vars) == 0:
+            warnings.warn(
+                f"GEE/xee dataset for {dataset_label} has no data variables. "
+                "Returning an empty raster fallback for this window.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return None
+
+        return ds
+
     def _fetch_dem(self, ee, xr, geometry, return_xarray: bool = False):
         """Fetch DEM and build rasterio profile."""
         from rasterio.crs import CRS
@@ -1073,6 +1157,61 @@ class GEEFetcher:
             return arr, profile, self._array_to_dataarray(arr, profile, "dem")
         return arr, profile
 
+    @staticmethod
+    def _build_single_sensor_ndvi_coll(ee, sensor_cfg, s_date, e_date, geometry):
+        """
+        Build a per-image NDVI collection for a single Landsat/Sentinel sensor.
+        Applies the appropriate cloud mask and returns an ImageCollection of
+        single-band NDVI images in the window [s_date, e_date].
+
+        For LANDSAT7 the end date is silently capped to slc_cutoff_end so that
+        SLC-off data is never included; windows entirely after the cutoff
+        return None (caller should skip them).
+        """
+        slc_cutoff = sensor_cfg.get("slc_cutoff_end")
+        effective_end = e_date
+        if slc_cutoff is not None:
+            if s_date > slc_cutoff:
+                return None   # entire window is SLC-off; skip
+            if effective_end > slc_cutoff:
+                effective_end = slc_cutoff
+
+        coll = (
+            ee.ImageCollection(sensor_cfg["asset"])
+            .filterDate(s_date, effective_end)
+            .filterBounds(geometry)
+        )
+
+        if sensor_cfg.get("cloud_thresh") is None:
+            # Landsat QA_PIXEL bitwise mask: bits 3 (cloud) and 4 (cloud shadow)
+            nir_b = sensor_cfg["nir_band"]
+            red_b = sensor_cfg["red_band"]
+            cloud_b = sensor_cfg["cloud_band"]
+
+            def _mask_and_ndvi(img):
+                qa   = img.select(cloud_b)
+                mask = qa.bitwiseAnd(1 << 3).eq(0).And(qa.bitwiseAnd(1 << 4).eq(0))
+                nir  = img.select(nir_b).toFloat()
+                red  = img.select(red_b).toFloat()
+                ndvi = nir.subtract(red).divide(nir.add(red)).rename("NDVI")
+                return ndvi.updateMask(mask)
+
+            return coll.map(_mask_and_ndvi)
+        else:
+            thresh  = sensor_cfg["cloud_thresh"]
+            nir_b   = sensor_cfg["nir_band"]
+            red_b   = sensor_cfg["red_band"]
+            cloud_b = sensor_cfg["cloud_band"]
+
+            def _mask_and_ndvi_s2(img):
+                mask = img.select(cloud_b).lt(thresh)
+                nir  = img.select(nir_b).toFloat()
+                red  = img.select(red_b).toFloat()
+                ndvi = nir.subtract(red).divide(nir.add(red)).rename("NDVI")
+                return ndvi.updateMask(mask)
+
+            return coll.map(_mask_and_ndvi_s2)
+
     def _fetch_ndvi(
         self,
         ee,
@@ -1084,9 +1223,93 @@ class GEEFetcher:
         return_xarray: bool = False,
     ):
         """Compute median NDVI from the chosen sensor over the date range."""
-        cfg  = self._nv_cfg
+        cfg    = self._nv_cfg
         s_date = start_date if start_date is not None else self._start
-        e_date = end_date if end_date is not None else self._end
+        e_date = end_date   if end_date   is not None else self._end
+
+        # ── LANDSATALL: merge per-sensor NDVI sub-collections ────────────────
+        if cfg.get("type") == "merged":
+            sub_colls = []
+            for sensor_key in cfg["sensors"]:
+                sub_cfg = _NDVI_CATALOGUE[sensor_key]
+                sub_coll = self._build_single_sensor_ndvi_coll(
+                    ee, sub_cfg, s_date, e_date, geometry
+                )
+                if sub_coll is not None:
+                    sub_colls.append(sub_coll)
+            if not sub_colls:
+                warnings.warn(
+                    f"LANDSATALL: no Landsat missions overlap window {s_date}→{e_date}. "
+                    "Returning NaN NDVI grid for this window.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                arr = np.full(
+                    (int(ref_profile["height"]), int(ref_profile["width"])),
+                    np.nan,
+                    dtype=np.float64,
+                )
+                if return_xarray:
+                    return arr, self._array_to_dataarray(arr, ref_profile, "ndvi")
+                return arr
+            # Merge all sub-collections into one and take the pixel-wise median
+            merged = sub_colls[0]
+            for sc in sub_colls[1:]:
+                merged = merged.merge(sc)
+            ndvi_img = merged.median().clip(geometry)
+
+            ds = self._open_dataset_safe(
+                xr,
+                ee.ImageCollection([ndvi_img]),
+                geometry=geometry,
+                scale=self._scale,
+                crs=self._crs,
+                dataset_label=f"NDVI LANDSATALL {s_date}→{e_date}",
+            )
+            if ds is None:
+                arr = np.full(
+                    (int(ref_profile["height"]), int(ref_profile["width"])),
+                    np.nan,
+                    dtype=np.float64,
+                )
+                print(
+                    f"  NDVI empty for window {s_date}→{e_date} (LANDSATALL); "
+                    "returning NaN grid"
+                )
+                if return_xarray:
+                    return arr, self._array_to_dataarray(arr, ref_profile, "ndvi")
+                return arr
+
+            band = "NDVI" if "NDVI" in ds else list(ds.data_vars)[0]
+            arr, _, _, _ = self._to_2d_yx(ds[band])
+            arr = arr.astype(np.float64)
+            arr = self._match_grid(arr, ref_profile)
+            arr = np.clip(arr, -1.0, 1.0)
+            print(f"  NDVI shape: {arr.shape}, range: "
+                  f"{np.nanmin(arr):.3f}–{np.nanmax(arr):.3f} (LANDSATALL merged)")
+            if return_xarray:
+                return arr, self._array_to_dataarray(arr, ref_profile, "ndvi")
+            return arr
+
+        # ── Single-sensor path ───────────────────────────────────────────────
+        # For Landsat 7 SLC-on only: cap the end date to the day before SLC failure.
+        slc_cutoff = cfg.get("slc_cutoff_end")
+        if slc_cutoff is not None and e_date > slc_cutoff:
+            warnings.warn(
+                f"LANDSAT7 NDVI end date capped to {slc_cutoff} to exclude "
+                f"SLC-off data (SLC failed 2003-05-31). "
+                f"Requested end date was {e_date}.",
+                UserWarning,
+                stacklevel=3,
+            )
+            e_date = slc_cutoff
+        if slc_cutoff is not None and s_date > slc_cutoff:
+            raise ValueError(
+                f"LANDSAT7 ndvi_source: the requested start date ({s_date}) is after the "
+                f"SLC failure ({slc_cutoff}). All Landsat 7 data after this date has "
+                f"scan-line gaps. Use a different sensor or an earlier date range."
+            )
+
         coll = (
             ee.ImageCollection(cfg["asset"])
             .filterDate(s_date, e_date)
@@ -1119,14 +1342,24 @@ class GEEFetcher:
         ndvi_coll = coll.map(_add_ndvi)
         ndvi_img  = ndvi_coll.median().clip(geometry)
 
-        import xee  # noqa
-        ds = xr.open_dataset(
+        ds = self._open_dataset_safe(
+            xr,
             ee.ImageCollection([ndvi_img]),
-            engine   = "ee",
-            geometry = geometry,
-            scale    = self._scale,
-            crs      = self._crs,
+            geometry=geometry,
+            scale=self._scale,
+            crs=self._crs,
+            dataset_label=f"NDVI {cfg.get('desc', 'sensor')} {s_date}→{e_date}",
         )
+        if ds is None:
+            arr = np.full(
+                (int(ref_profile["height"]), int(ref_profile["width"])),
+                np.nan,
+                dtype=np.float64,
+            )
+            print(f"  NDVI empty for window {s_date}→{e_date}; returning NaN grid")
+            if return_xarray:
+                return arr, self._array_to_dataarray(arr, ref_profile, "ndvi")
+            return arr
 
         band = "NDVI" if "NDVI" in ds else list(ds.data_vars)[0]
         arr, _, _, _ = self._to_2d_yx(ds[band])
@@ -1167,14 +1400,24 @@ class GEEFetcher:
         else:
             rf_img = coll.mean().clip(geometry)
 
-        import xee  # noqa
-        ds = xr.open_dataset(
+        ds = self._open_dataset_safe(
+            xr,
             ee.ImageCollection([rf_img]),
-            engine   = "ee",
-            geometry = geometry,
-            scale    = self._rf_cfg["scale"],   # use native RF scale; resample after
-            crs      = self._crs,
+            geometry=geometry,
+            scale=self._rf_cfg["scale"],   # use native RF scale; resample after
+            crs=self._crs,
+            dataset_label=f"Rainfall {cfg.get('desc', 'source')} {s_date}→{e_date}",
         )
+        if ds is None:
+            arr = np.full(
+                (int(ref_profile["height"]), int(ref_profile["width"])),
+                np.nan,
+                dtype=np.float64,
+            )
+            print(f"  Rainfall empty for window {s_date}→{e_date}; returning NaN grid")
+            if return_xarray:
+                return arr, self._array_to_dataarray(arr, ref_profile, "rainfall")
+            return arr
 
         band = cfg["band"] if cfg["band"] in ds else list(ds.data_vars)[0]
         arr, _, _, _ = self._to_2d_yx(ds[band])
@@ -1211,14 +1454,24 @@ class GEEFetcher:
                     .limit(1)
                     .select(band))
 
-        import xee  # noqa
-        ds = xr.open_dataset(
+        ds = self._open_dataset_safe(
+            xr,
             coll,
-            engine   = "ee",
-            geometry = geometry,
-            scale    = cfg["scale"],
-            crs      = self._crs,
+            geometry=geometry,
+            scale=cfg["scale"],
+            crs=self._crs,
+            dataset_label=f"Land-cover {cfg.get('desc', 'source')}",
         )
+        if ds is None:
+            arr_i = np.full(
+                (int(ref_profile["height"]), int(ref_profile["width"])),
+                -1,
+                dtype=np.int32,
+            )
+            print("  Land cover empty; returning nodata grid (-1)")
+            if return_xarray:
+                return arr_i, self._array_to_dataarray(arr_i, ref_profile, "landcover")
+            return arr_i
 
         b   = band if band in ds else list(ds.data_vars)[0]
         arr, _, _, _ = self._to_2d_yx(ds[b])
