@@ -7,7 +7,7 @@ Tests cover CRU classification logic, metadata preservation, and error handling.
 import pytest
 import numpy as np
 import xarray as xr
-from geomorphconn.analysis import classify_dynamic_crus
+from geomorphconn.analysis import classify_dynamic_crus, detect_connectivity_hotspots
 
 
 class TestCRUClassification:
@@ -140,6 +140,71 @@ class TestInputValidation:
                 dims=['time', 'y', 'x'],
             )
             classify_dynamic_crus(single_step)
+
+
+class TestHotspotPreprocessing:
+    """Tests for detect_connectivity_hotspots preprocessing API."""
+
+    def test_local_std_detects_central_hotspot(self):
+        # Build a 3-timestep IC cube with one strong central anomaly at t=2.
+        cube = np.zeros((3, 7, 7), dtype=float)
+        cube[2, 3, 3] = 10.0
+        ic = xr.DataArray(
+            cube,
+            coords={"time": np.arange(3), "y": np.arange(7), "x": np.arange(7)},
+            dims=["time", "y", "x"],
+        )
+
+        hs = detect_connectivity_hotspots(
+            ic,
+            method="local_std",
+            window_size=1,
+            sigma_threshold=1.0,
+        )
+
+        assert hs.sel(time=2, y=3, x=3).item() == 1
+
+    def test_quantile_per_timestep_returns_ternary(self):
+        rng = np.random.default_rng(42)
+        ic = xr.DataArray(
+            rng.normal(size=(5, 10, 10)),
+            coords={"time": np.arange(5), "y": np.arange(10), "x": np.arange(10)},
+            dims=["time", "y", "x"],
+        )
+
+        hs = detect_connectivity_hotspots(ic, method="quantile_per_timestep")
+        vals = np.unique(np.asarray(hs.values[~np.isnan(hs.values)]))
+        assert set(vals.tolist()).issubset({-1, 0, 1})
+
+    def test_quantile_global_returns_ternary(self):
+        rng = np.random.default_rng(7)
+        ic = xr.DataArray(
+            rng.normal(size=(6, 8, 8)),
+            coords={"time": np.arange(6), "y": np.arange(8), "x": np.arange(8)},
+            dims=["time", "y", "x"],
+        )
+
+        hs = detect_connectivity_hotspots(ic, method="quantile_global")
+        vals = np.unique(np.asarray(hs.values[~np.isnan(hs.values)]))
+        assert set(vals.tolist()).issubset({-1, 0, 1})
+
+    def test_hotspot_preprocessing_method_validation(self):
+        ic = xr.DataArray(
+            np.zeros((3, 4, 4)),
+            coords={"time": np.arange(3), "y": np.arange(4), "x": np.arange(4)},
+            dims=["time", "y", "x"],
+        )
+        with pytest.raises(ValueError, match="method must be one of"):
+            detect_connectivity_hotspots(ic, method="unknown")
+
+    def test_hotspot_preprocessing_window_validation(self):
+        ic = xr.DataArray(
+            np.zeros((3, 4, 4)),
+            coords={"time": np.arange(3), "y": np.arange(4), "x": np.arange(4)},
+            dims=["time", "y", "x"],
+        )
+        with pytest.raises(ValueError, match="window_size"):
+            detect_connectivity_hotspots(ic, method="local_std", window_size=4)
 
 
 class TestEdgeCases:

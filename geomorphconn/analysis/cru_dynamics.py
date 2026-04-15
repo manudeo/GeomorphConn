@@ -16,7 +16,8 @@ References:
         floodplain wetland. Sci. Total Environ. 651: 2473-2488.
 """
 
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
+import numpy as np
 import xarray as xr
 
 
@@ -36,6 +37,140 @@ CRU_CLASSES = {
     5: "Sporadic Hotspot",
     6: "New Hotspot",
 }
+
+
+def _infer_time_dim(da: xr.DataArray) -> str:
+    """Infer time dimension name from common conventions."""
+    for dim in da.dims:
+        if dim.lower() in ("time", "temporal", "t"):
+            return dim
+    raise ValueError(
+        f"Could not identify time dimension in {da.dims}. "
+        "Expected one of: 'time', 'temporal', 't'."
+    )
+
+
+def _infer_spatial_dims(da: xr.DataArray, time_dim: str) -> Tuple[str, str]:
+    """Infer spatial (y, x) dims from common names, fallback to non-time dims."""
+    dim_map = {d.lower(): d for d in da.dims}
+    y_dim = dim_map.get("y") or dim_map.get("lat") or dim_map.get("latitude")
+    x_dim = dim_map.get("x") or dim_map.get("lon") or dim_map.get("longitude")
+
+    if y_dim is not None and x_dim is not None and y_dim != time_dim and x_dim != time_dim:
+        return y_dim, x_dim
+
+    non_time = [d for d in da.dims if d != time_dim]
+    if len(non_time) < 2:
+        raise ValueError(
+            f"Expected at least 2 spatial dimensions in {da.dims}; got {non_time}."
+        )
+    return non_time[-2], non_time[-1]
+
+
+def detect_connectivity_hotspots(
+    ic_timeseries: xr.DataArray,
+    method: str = "local_std",
+    window_size: int = 3,
+    sigma_threshold: float = 1.0,
+    quantile_low: float = 0.2,
+    quantile_high: float = 0.8,
+    preserve_nan_mask: bool = True,
+) -> xr.DataArray:
+    """
+    Convert continuous IC time series into ternary hotspot states (-1, 0, +1).
+
+    This is the recommended preprocessing step before ``classify_dynamic_crus``
+    when the input is continuous IC rather than already-thresholded hotspot maps.
+
+    Parameters
+    ----------
+    ic_timeseries : xr.DataArray
+        Continuous IC cube with shape (time, y, x) (or equivalent dim names).
+    method : str, optional
+        One of:
+        - ``"local_std"``: rolling local mean compared against basin-wide
+          mean ± ``sigma_threshold * global_std`` at each timestep.
+        - ``"quantile_per_timestep"``: classify by per-timestep spatial quantiles.
+        - ``"quantile_global"``: classify by one fixed global quantile pair.
+        Default: ``"local_std"``.
+    window_size : int, optional
+        Rolling window size for ``local_std`` (e.g., 3 => 3x3). Must be odd.
+        Default: 3.
+    sigma_threshold : float, optional
+        Sigma multiplier for ``local_std`` thresholding. Default: 1.0.
+    quantile_low : float, optional
+        Lower quantile for quantile methods. Default: 0.2.
+    quantile_high : float, optional
+        Upper quantile for quantile methods. Default: 0.8.
+    preserve_nan_mask : bool, optional
+        If True, keep NaNs where IC is NaN. If False, fill with 0 (neutral).
+
+    Returns
+    -------
+    xr.DataArray
+        Ternary hotspot state cube with values in {-1, 0, +1} and optional NaNs.
+        Same shape and dims as input.
+    """
+    if not isinstance(ic_timeseries, xr.DataArray):
+        raise TypeError(f"Expected xarray.DataArray, got {type(ic_timeseries)}")
+
+    time_dim = _infer_time_dim(ic_timeseries)
+    y_dim, x_dim = _infer_spatial_dims(ic_timeseries, time_dim)
+
+    if method not in {"local_std", "quantile_per_timestep", "quantile_global"}:
+        raise ValueError(
+            "method must be one of: 'local_std', 'quantile_per_timestep', 'quantile_global'"
+        )
+
+    if window_size < 1 or window_size % 2 == 0:
+        raise ValueError("window_size must be an odd integer >= 1")
+
+    if not (0.0 < quantile_low < quantile_high < 1.0):
+        raise ValueError("quantile_low and quantile_high must satisfy 0 < low < high < 1")
+
+    da = ic_timeseries.astype("float64")
+
+    if method == "local_std":
+        # Spatially local anomaly detector per timestep (your original approach).
+        local_mean = da.rolling(
+            {y_dim: window_size, x_dim: window_size},
+            center=True,
+            min_periods=1,
+        ).mean()
+
+        global_mean = da.mean(dim=(y_dim, x_dim), skipna=True)
+        global_std = da.std(dim=(y_dim, x_dim), skipna=True)
+        upper = global_mean + sigma_threshold * global_std
+        lower = global_mean - sigma_threshold * global_std
+
+        states = xr.where(local_mean > upper, 1, xr.where(local_mean < lower, -1, 0))
+
+    elif method == "quantile_per_timestep":
+        low = da.quantile(quantile_low, dim=(y_dim, x_dim), skipna=True)
+        high = da.quantile(quantile_high, dim=(y_dim, x_dim), skipna=True)
+        states = xr.where(da <= low, -1, xr.where(da >= high, 1, 0))
+
+    else:  # quantile_global
+        low_g = da.quantile(quantile_low, dim=(time_dim, y_dim, x_dim), skipna=True)
+        high_g = da.quantile(quantile_high, dim=(time_dim, y_dim, x_dim), skipna=True)
+        states = xr.where(da <= low_g, -1, xr.where(da >= high_g, 1, 0))
+
+    if preserve_nan_mask:
+        states = states.where(~np.isnan(da))
+    else:
+        states = states.fillna(0)
+
+    states.name = "hotspots"
+    states.attrs.update({
+        "method": method,
+        "window_size": int(window_size),
+        "sigma_threshold": float(sigma_threshold),
+        "quantile_low": float(quantile_low),
+        "quantile_high": float(quantile_high),
+        "preserve_nan_mask": bool(preserve_nan_mask),
+    })
+
+    return states
 
 
 def classify_dynamic_crus(
@@ -81,9 +216,9 @@ def classify_dynamic_crus(
     ----------
     connectivity_timeseries : xr.DataArray
         Time series of connectivity metrics, shape (time, y, x).
-        Values typically range [−1, 0, 1] from hotspot detection
-        (−1 = coldspot, 0 = neutral, 1 = hotspot), or can be continuous
-        connectivity index values (IC).
+        Expected input is ternary hotspot states from
+        ``detect_connectivity_hotspots`` (−1 = coldspot, 0 = neutral, +1 = hotspot).
+        Continuous IC values are accepted but may bias classes if not preprocessed.
         Expected dims: ('time', 'y', 'x') or similar spatial names.
         Required coordinate: time dimension name (inferred from data).
 
@@ -167,16 +302,7 @@ def classify_dynamic_crus(
         raise TypeError(f"Expected xarray.DataArray, got {type(connectivity_timeseries)}")
     
     # Infer time dimension (common names: 'time', 'temporal', etc.)
-    time_dim = None
-    for dim in connectivity_timeseries.dims:
-        if dim.lower() in ('time', 'temporal', 't'):
-            time_dim = dim
-            break
-    if time_dim is None:
-        raise ValueError(
-            f"Could not identify time dimension in {connectivity_timeseries.dims}. "
-            "Expected one of: 'time', 'temporal', 't'."
-        )
+    time_dim = _infer_time_dim(connectivity_timeseries)
     
     n_timesteps = connectivity_timeseries.sizes[time_dim]
     if n_timesteps < 2:

@@ -25,7 +25,7 @@ Earth.
 | **Hydrological weights** | W = f(RF_norm, NDVI-C-factor) — extends purely topographic/land-cover weighting |
 | **Flow direction options** | D8 (steepest), D-infinity, Multiple-Flow-Direction (MFD) via Landlab |
 | **TauDEM backend (optional)** | External TauDEM+MPI routing backend for outlet/target IC (`compute_backend="taudem"`) |
-| **GEE data fetching** | DEM: SRTM / CopDEM-30 / MERIT-DEM; Rainfall: CHIRPS / ERA5 / PERSIANN; NDVI: Landsat-8/9 / Sentinel-2 |
+| **GEE data fetching** | DEM: SRTM / CopDEM-30 / MERIT-DEM; Rainfall: CHIRPS / ERA5 / PERSIANN; NDVI: Sentinel-2, Landsat-5/7/8/9, and `LANDSATALL` |
 | **ArcGIS tools** | Native ArcGIS workflows provided for ArcGIS Pro (`.atbx`) and ArcMap 10.8 (`.tbx`) in `arcgis_tools/` |
 | **Speed** | Optional `numba` JIT compilation for O(N) traversal loops |
 
@@ -141,6 +141,27 @@ GEE details are also covered in the outlet guide, including:
 
 - `GEEFetcher.fetch(return_xarray=True)`
 - `GEEFetcher.fetch_timeseries(resampling="monthly" | "seasonal" | "annual")`
+
+Time-series CRU workflows can preprocess continuous IC into ternary hotspot states
+before classification:
+
+```python
+from geomorphconn.analysis import detect_connectivity_hotspots, classify_dynamic_crus
+
+hotspots = detect_connectivity_hotspots(
+    ds["IC"],
+    method="local_std",              # "local_std", "quantile_per_timestep", "quantile_global"
+    threshold_sigma=1.0,
+    window_size=9,
+)
+
+cru_classes = classify_dynamic_crus(hotspots)
+```
+
+Notes:
+- `local_std` mirrors the rolling-window anomaly method and labels each cell as `-1`, `0`, or `1`.
+- `quantile_per_timestep` and `quantile_global` are robust alternatives when variance changes strongly over time.
+- Use `LANDSATALL` in `GEEFetcher.fetch_timeseries(...)` to merge Landsat 5/7/8/9 while excluding Landsat-7 SLC-off data.
 
 ### Google Earth Engine authentication (local setup)
 
