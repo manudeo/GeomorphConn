@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import warnings
 
 import numpy as np
 import pytest
@@ -8,6 +9,7 @@ import rasterio
 from rasterio.transform import from_origin
 
 from geomorphconn.cli import main
+import geomorphconn.cli as cli
 
 
 def _write_tif(path: Path, arr: np.ndarray):
@@ -505,3 +507,23 @@ def test_cli_gui_streamlit_missing_returns_2(monkeypatch):
     monkeypatch.setattr("geomorphconn.cli.subprocess.call", _raise_file_not_found)
     rc = main(["gui", "--backend", "streamlit", "--no-show-welcome"])
     assert rc == 2
+
+
+def test_make_connectivity_index_suppresses_duplicate_depression_warning(monkeypatch):
+    class _DummyCI:
+        def __init__(self, *args, **kwargs):
+            import warnings
+
+            warnings.warn(
+                "Using DepressionFinderAndRouter: typically better depression handling and routing quality, but runtime may increase (especially on high-resolution DEMs).",
+                UserWarning,
+                stacklevel=2,
+            )
+
+    monkeypatch.setattr(cli, "ConnectivityIndex", _DummyCI)
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        cli._make_connectivity_index(object(), depression_finder="DepressionFinderAndRouter")
+
+    assert len(recorded) == 0

@@ -8,6 +8,7 @@ import math
 import subprocess
 import sys
 import gc
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,17 @@ _FIELD_MAP = {
     "Smean": "connectivity_index__Smean",
     "ACCfinal": "connectivity_index__ACCfinal",
 }
+
+
+def _make_connectivity_index(*args, **kwargs):
+    """Construct ConnectivityIndex while suppressing CLI-duplicated warnings."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Using DepressionFinderAndRouter: typically better depression handling and routing quality, but runtime may increase \(especially on high-resolution DEMs\)\.",
+            category=UserWarning,
+        )
+        return ConnectivityIndex(*args, **kwargs)
 
 
 def _welcome_text() -> str:
@@ -526,7 +538,7 @@ def _run_command(args) -> int:
             if user_weight is None:
                 print("Error: weight raster missing after preprocessing.", file=sys.stderr)
                 return 2
-            ic = ConnectivityIndex(
+            ic = _make_connectivity_index(
                 grid,
                 flow_director=args.flow_director,
                 weight=np.flipud(user_weight).ravel(),
@@ -562,7 +574,7 @@ def _run_command(args) -> int:
                     )
                 )
 
-            ic = ConnectivityIndex(
+            ic = _make_connectivity_index(
                 grid,
                 flow_director=args.flow_director,
                 weight=weight_builder,

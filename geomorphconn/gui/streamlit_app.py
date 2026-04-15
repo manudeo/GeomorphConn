@@ -7,6 +7,7 @@ import tempfile
 import gc
 import zipfile
 import hashlib
+import warnings
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,17 @@ _FIELD_MAP = {
     "Smean": "connectivity_index__Smean",
     "ACCfinal": "connectivity_index__ACCfinal",
 }
+
+
+def _make_connectivity_index(*args, **kwargs):
+    """Construct ConnectivityIndex while suppressing GUI-duplicated warnings."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Using DepressionFinderAndRouter: typically better depression handling and routing quality, but runtime may increase \(especially on high-resolution DEMs\)\.",
+            category=UserWarning,
+        )
+        return ConnectivityIndex(*args, **kwargs)
 
 
 def _read_uploaded_raster(uploaded_file):
@@ -217,7 +229,7 @@ def _compute_ic(
             "w_max": w_max,
             "use_aspect_weighting": use_aspect_weighting,
         }
-        ic = ConnectivityIndex(
+        ic = _make_connectivity_index(
             grid,
             **ci_kwargs,
         )
@@ -251,7 +263,7 @@ def _compute_ic(
             "use_aspect_weighting": use_aspect_weighting,
         }
 
-        ic = ConnectivityIndex(grid, **ci_kwargs)
+        ic = _make_connectivity_index(grid, **ci_kwargs)
     ic.run_one_step()
 
     return {
