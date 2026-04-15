@@ -383,16 +383,25 @@ def _imshow_kwargs(key: str, arr: np.ndarray) -> dict:
 
     valid = arr[np.isfinite(arr)]
     if key in _LOG_SCALE_KEYS:
-        vmin = float(np.percentile(valid, 2)) if valid.size > 0 else None
-        vmax = float(np.percentile(valid, 98)) if valid.size > 0 else None
+        if valid.size == 0:
+            return {"cmap": "viridis"}
+
+        vmin = float(np.percentile(valid, 2))
+        vmax = float(np.percentile(valid, 98))
         # LogNorm requires strictly positive bounds
-        vmin = max(vmin, 1e-6) if vmin is not None and vmin <= 0 else vmin
-        vmax = max(vmax, (vmin or 1e-6) * 10) if vmax is not None and vmax <= (vmin or 0) else vmax
+        vmin = max(vmin, 1e-6) if vmin <= 0 else vmin
+        if vmax <= vmin:
+            vmax = vmin * 10.0
+
+        # If all valid values are non-positive, LogNorm is not valid.
+        if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= 0:
+            return {"cmap": "viridis"}
+
         try:
             norm = mcolors.LogNorm(vmin=vmin, vmax=vmax)
         except Exception:
             norm = None
-        return {"norm": norm, "cmap": "viridis"}
+        return {"norm": norm, "cmap": "viridis"} if norm is not None else {"cmap": "viridis"}
     else:
         if valid.size > 0:
             vmin = float(np.percentile(valid, 2))
@@ -408,12 +417,25 @@ def _plot_all_output_layers(outputs: dict):
     ncols, nrows = 4, 2
     fig, axes = plt.subplots(nrows, ncols, figsize=(14, 8))
     for ax, key in zip(axes.flatten(), keys):
-        masked = np.ma.masked_invalid(outputs[key])
-        kw = _imshow_kwargs(key, outputs[key])
+        arr = np.asarray(outputs[key], dtype=np.float64)
+        masked = np.ma.masked_invalid(arr)
+        kw = _imshow_kwargs(key, arr)
         im = ax.imshow(masked, origin="upper", **kw)
         ax.set_title(key, fontsize=9)
         ax.tick_params(labelsize=6)
-        fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+        if np.isfinite(arr).any():
+            fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+        else:
+            ax.text(
+                0.5,
+                0.5,
+                "No valid data",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
+                fontsize=8,
+                color="0.35",
+            )
     fig.suptitle("GeomorphConn \u2013 output layers", fontsize=11)
     fig.tight_layout()
     return fig

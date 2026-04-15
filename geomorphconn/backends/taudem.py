@@ -280,37 +280,70 @@ def _ddn_weighted_flow_length_d8(
     return ddn
 
 
-def _dominant_outlet_mask(receivers: np.ndarray, outlet_metric: np.ndarray) -> np.ndarray | None:
+def _dominant_outlet_mask(
+    receivers: np.ndarray,
+    outlet_metric: np.ndarray,
+    valid_nodes: np.ndarray | None = None,
+) -> np.ndarray | None:
     n_nodes = receivers.size
+    if valid_nodes is None:
+        valid = np.ones(n_nodes, dtype=bool)
+    else:
+        valid = np.asarray(valid_nodes, dtype=bool).ravel()
+        if valid.size != n_nodes:
+            raise ValueError("valid_nodes size must match receivers size")
+
     nodes = np.arange(n_nodes, dtype=np.int64)
-    outlets = nodes[receivers == nodes]
+    outlets = nodes[(receivers == nodes) & valid]
     if outlets.size == 0:
         return None
-    main_outlet = outlets[np.argmax(outlet_metric[outlets])]
 
     visited = np.full(n_nodes, -1, dtype=np.int64)
 
     def _terminal(start: int) -> int:
+        if not valid[start]:
+            visited[start] = -1
+            return -1
+
         trail = []
         cur = int(start)
         while True:
+            if visited[cur] >= 0:
+                term = int(visited[cur])
+                break
             nxt = int(receivers[cur])
             trail.append(cur)
             if nxt == cur:
                 term = cur
                 break
-            if visited[cur] >= 0:
-                term = int(visited[cur])
+            if not valid[nxt]:
+                term = cur
                 break
             cur = nxt
         for t in trail:
             visited[t] = term
         return term
 
-    for i in range(n_nodes):
+    for i in np.where(valid)[0]:
         if visited[i] < 0:
             _terminal(i)
-    return visited == int(main_outlet)
+
+    metric = np.asarray(outlet_metric, dtype=np.float64).ravel()
+    metric_out = metric[outlets]
+    finite_out = np.isfinite(metric_out)
+    if np.any(finite_out):
+        main_outlet = int(outlets[np.argmax(metric_out)])
+    else:
+        # Fallback for datasets where outlet accumulation metric is nodata/NaN
+        # at all outlet nodes: choose the largest terminal basin by membership.
+        terms = visited[valid]
+        terms = terms[terms >= 0]
+        if terms.size == 0:
+            return None
+        uniq, counts = np.unique(terms, return_counts=True)
+        main_outlet = int(uniq[np.argmax(counts)])
+
+    return (visited == int(main_outlet)) & valid
 
 
 def run_connectivity_taudem_arrays(
@@ -628,10 +661,14 @@ def run_connectivity_taudem_arrays(
         analysis_mask_bool[mgeo] = True
 
     if main_basin_only:
-        outlet_metric = np.nan_to_num(np.asarray(ad8, dtype=np.float64).ravel(), nan=0.0)
-        dom_mask = _dominant_outlet_mask(receivers, outlet_metric)
-        if dom_mask is not None:
-            analysis_mask_bool = dom_mask if analysis_mask_bool is None else (analysis_mask_bool & dom_mask)
+        outlet_metric = np.asarray(ad8, dtype=np.float64).ravel()
+        outlet_metric[~valid_flat] = np.nan
+        dom_mask = _dominant_outlet_mask(receivers, outlet_metric, valid_flat)
+        if dom_mask is None or not np.any(dom_mask):
+            raise ValueError("Could not derive a valid outlet-based main basin mask")
+        analysis_mask_bool = dom_mask if analysis_mask_bool is None else (analysis_mask_bool & dom_mask)
+        if not np.any(analysis_mask_bool):
+            raise ValueError("Analysis mask is empty after intersecting with outlet-based main basin")
 
     outside = ~valid_flat | boundary_flat
     if analysis_mask_bool is not None:
