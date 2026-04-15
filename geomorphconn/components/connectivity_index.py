@@ -115,27 +115,56 @@ def _acc_mfd_py(weight, receivers, proportions, node_order):
     return acc
 
 
-def _ddn_d8_py(local_contrib, inv_WS, receivers, node_order):
+def _ddn_weighted_flow_length_d8_py(dist_to_receiver, inv_WS, receivers, node_order):
     """
-    Downstream weighted flow-path length (D_dn), D8 only.
-        Traverses outlets first. Terminal nodes (outlets or target sinks) get
-        D_dn = inv_WS[node], consistent with the ArcGIS Borselli recipe.
+    SedInConnect-style downstream weighted flow-length (D_dn), D8 only.
+
+    This follows the iterative propagation logic used by SedInConnect's
+    weighted flow-length routine:
+    - cells directly draining to terminal cells are initialised to 0,
+    - the next upstream ring is also initialised to 0,
+    - farther upstream rings accumulate trapezoidal segment cost.
     """
-    ddn = local_contrib.copy()
-        # Accept either topological order direction.
-    n = len(local_contrib)
-    pos = np.empty(n, dtype=np.int64)
-    pos[node_order] = np.arange(len(node_order), dtype=np.int64)
+    n = len(receivers)
+    _ = node_order  # kept for API compatibility with older kernel signature
+
+    upstream = [[] for _ in range(n)]
     idx = np.arange(n, dtype=np.int64)
-    m = receivers != idx
-    downstream_first = bool(np.all(pos[receivers[m]] < pos[idx[m]]))
-    it = node_order if downstream_first else node_order[::-1]
-    for node in it:
+    for node in range(n):
         rec = int(receivers[node])
-        if rec == node:                 # outlet / imposed sink
-            ddn[node] = inv_WS[node]
-        else:
-            ddn[node] = local_contrib[node] + ddn[rec]
+        if rec >= 0 and rec != int(idx[node]):
+            upstream[rec].append(node)
+
+    ddn = np.full(n, -1.0, dtype=np.float64)
+    terminals = np.where(receivers == idx)[0].astype(np.int64)
+
+    frontier: list[int] = []
+    for term in terminals:
+        for up in upstream[int(term)]:
+            if ddn[up] < 0.0:
+                ddn[up] = 0.0
+                frontier.append(up)
+
+    count = 1
+    while frontier:
+        nxt: list[int] = []
+        for cur in frontier:
+            for up in upstream[int(cur)]:
+                if ddn[up] >= 0.0:
+                    continue
+                if count == 1:
+                    ddn[up] = 0.0
+                else:
+                    seg = float(dist_to_receiver[up]) * (
+                        (float(inv_WS[cur]) + float(inv_WS[up])) / 2.0
+                    )
+                    ddn[up] = float(ddn[cur]) + seg
+                nxt.append(up)
+        frontier = nxt
+        count += 1
+
+    ddn[ddn == 0.0] = 1.0
+    ddn[ddn < 0.0] = np.nan
     return ddn
 
 
@@ -165,18 +194,6 @@ if _NUMBA:
                     acc[rec] += val * prop
         return acc
 
-    @_njit(cache=True)
-    def _ddn_d8_jit(local_contrib, inv_WS, receivers, node_order):
-        ddn = local_contrib.copy()
-        for i in range(len(node_order)):
-            node = node_order[i]
-            rec  = receivers[node]
-            if rec == node:
-                ddn[node] = inv_WS[node]
-            else:
-                ddn[node] = local_contrib[node] + ddn[rec]
-        return ddn
-
     # Wrappers with dtype enforcement
     def _acc_d8(w, rec, order):
         return _acc_d8_jit(
@@ -187,13 +204,17 @@ if _NUMBA:
         return _acc_mfd_jit(w.astype(np.float64), rec.astype(np.int64),
                             prop.astype(np.float64), order.astype(np.int64))
 
-    def _ddn_d8(lc, iws, rec, order):
-        return _ddn_d8_jit(lc.astype(np.float64), iws.astype(np.float64),
-                           rec.astype(np.int64), order.astype(np.int64))
+    def _ddn_weighted_flow_length_d8(dist, iws, rec, order):
+        return _ddn_weighted_flow_length_d8_py(
+            dist.astype(np.float64),
+            iws.astype(np.float64),
+            rec.astype(np.int64),
+            order.astype(np.int64),
+        )
 else:
     _acc_d8  = _acc_d8_py
     _acc_mfd = _acc_mfd_py
-    _ddn_d8  = _ddn_d8_py
+    _ddn_weighted_flow_length_d8 = _ddn_weighted_flow_length_d8_py
 
 
 # Main component
@@ -1023,8 +1044,11 @@ class ConnectivityIndex(Component):
             C = (1.0 - self._ndvi.astype(np.float64)) / 2.0
             W = np.clip((RF_norm + C) / 2.0, self._w_min, self._w_max)
 
-        # S is independent of weight mode and clipped to [w_min, w_max].
-        S = np.clip(slope_tan, self._w_min, self._w_max)
+        # Match SedInConnect slope handling in D_dn and D_up terms.
+        S = np.asarray(slope_tan, dtype=np.float64).copy()
+        S[(S >= 0.0) & (S < self._w_min)] = self._w_min
+        S[S > self._w_max] = self._w_max
+        S[S < 0.0] = -1.0
 
         return W.astype(np.float64), S.astype(np.float64)
 
@@ -1054,23 +1078,24 @@ class ConnectivityIndex(Component):
             if self._use_aspect_weighting or eff_targets is not None:
                 # Recompute contributing-cell count under modified partitioning.
                 AccA = _acc_mfd(np.ones(n_nodes, dtype=np.float64), receivers, eff_props, node_order)
-                ACC_final = np.maximum(AccA + 1.0, 1.0)
+                ACC_final = AccA + 1.0
             else:
-                ACC_final = np.maximum(DA / cell_area, 1.0)
+                ACC_final = DA / cell_area
         else:
             AccW = _acc_d8(W, receivers, node_order)
             AccS = _acc_d8(S, receivers, node_order)
             if eff_targets is not None:
                 # Recompute contributing count after target outlets are imposed.
                 AccA = _acc_d8(np.ones(n_nodes, dtype=np.float64), receivers, node_order)
-                ACC_final = np.maximum(AccA + 1.0, 1.0)
+                ACC_final = AccA + 1.0
             else:
-                ACC_final = np.maximum(DA / cell_area, 1.0)
+                ACC_final = DA / cell_area
 
-        Wmean = (AccW + W) / ACC_final
-        Smean = (AccS + S) / ACC_final
-        A     = ACC_final * cell_area
-        Dup   = Wmean * Smean * np.sqrt(A)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            Wmean = (AccW + W) / ACC_final
+            Smean = (AccS + S) / ACC_final
+            A = ACC_final * cell_area
+            Dup = Wmean * Smean * np.sqrt(A)
         return Dup, Wmean, Smean, ACC_final
 
     def _build_aspect_weighted_proportions(self, receivers, proportions, d8_receivers):
@@ -1138,7 +1163,7 @@ class ConnectivityIndex(Component):
         dist[recv == np.arange(len(recv), dtype=np.int64)] = 0.0
 
         inv_WS = 1.0 / (W * S)
-        return _ddn_d8(dist * inv_WS, inv_WS, recv, order)
+        return _ddn_weighted_flow_length_d8(dist, inv_WS, recv, order)
 
     # Convenience
 

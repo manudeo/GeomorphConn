@@ -230,14 +230,53 @@ def _acc_d8(weight: np.ndarray, receivers: np.ndarray, node_order: np.ndarray) -
     return acc
 
 
-def _ddn_d8(local_contrib: np.ndarray, inv_ws: np.ndarray, receivers: np.ndarray, node_order: np.ndarray) -> np.ndarray:
-    ddn = local_contrib.copy()
-    for node in node_order[::-1]:
+def _ddn_weighted_flow_length_d8(
+    dist_to_receiver: np.ndarray,
+    inv_ws: np.ndarray,
+    receivers: np.ndarray,
+    node_order: np.ndarray,
+) -> np.ndarray:
+    """SedInConnect-style D8 weighted flow-length propagation for D_dn."""
+    n = receivers.size
+    _ = node_order  # kept for API compatibility
+
+    upstream: list[list[int]] = [[] for _ in range(n)]
+    idx = np.arange(n, dtype=np.int64)
+    for node in range(n):
         rec = int(receivers[node])
-        if rec == int(node):
-            ddn[node] = inv_ws[node]
-        else:
-            ddn[node] = local_contrib[node] + ddn[rec]
+        if rec >= 0 and rec != int(idx[node]):
+            upstream[rec].append(node)
+
+    ddn = np.full(n, -1.0, dtype=np.float64)
+    terminals = np.where(receivers == idx)[0].astype(np.int64)
+
+    frontier: list[int] = []
+    for term in terminals:
+        for up in upstream[int(term)]:
+            if ddn[up] < 0.0:
+                ddn[up] = 0.0
+                frontier.append(up)
+
+    count = 1
+    while frontier:
+        nxt: list[int] = []
+        for cur in frontier:
+            for up in upstream[int(cur)]:
+                if ddn[up] >= 0.0:
+                    continue
+                if count == 1:
+                    ddn[up] = 0.0
+                else:
+                    seg = float(dist_to_receiver[up]) * (
+                        (float(inv_ws[cur]) + float(inv_ws[up])) / 2.0
+                    )
+                    ddn[up] = float(ddn[cur]) + seg
+                nxt.append(up)
+        frontier = nxt
+        count += 1
+
+    ddn[ddn == 0.0] = 1.0
+    ddn[ddn < 0.0] = np.nan
     return ddn
 
 
@@ -433,7 +472,7 @@ def run_connectivity_taudem_arrays(
         sd8_proc = np.asarray(sd8, dtype=np.float64)
         sd8_proc[(sd8_proc >= 0.0) & (sd8_proc < w_min)] = w_min
         sd8_proc[sd8_proc > w_max] = w_max
-        sd8_proc[sd8_proc < 0.0] = np.nan
+        sd8_proc[sd8_proc < 0.0] = -1.0
     receivers = _receivers_from_taudem_d8(p, valid_mask)
 
     # Explicit targets are provided as Landlab node IDs; convert to GeoTIFF order.
@@ -520,14 +559,16 @@ def run_connectivity_taudem_arrays(
 
             # Weighted D8 upstream accumulation uses local topological propagation in-memory.
             order = _topological_order_d8(receivers)
-            S = np.clip(np.abs(np.asarray(sd8_proc, dtype=np.float64).ravel()), w_min, w_max)
-            S[~np.isfinite(S)] = w_min
+            S = np.asarray(sd8_proc, dtype=np.float64).ravel().copy()
+            S[(S >= 0.0) & (S < w_min)] = w_min
+            S[S > w_max] = w_max
+            S[S < 0.0] = -1.0
             valid_flat = valid_mask.ravel()
             ones = valid_flat.astype(np.float64)
             acc_w = _acc_d8(W, receivers, order)
             acc_s = _acc_d8(S, receivers, order)
             acc_a = _acc_d8(ones, receivers, order)
-            acc_final = np.maximum(acc_a + ones, 1.0)
+            acc_final = acc_a + ones
         else:
             _run_cmd(_taudem_cmd(areadinf, ["-ang", str(ang_run), "-sca", str(sca_tif), "-nc"]), tdir2)
             _run_cmd(_taudem_cmd(areadinf, ["-ang", str(ang_run), "-sca", str(accw_tif), "-wg", str(tdir2 / 'weight.tif'), "-nc"]), tdir2)
@@ -538,21 +579,23 @@ def run_connectivity_taudem_arrays(
             accs = _read_float_raster(accs_tif)
 
             acc_final = np.asarray(sca, dtype=np.float64).ravel() / dx
-            acc_final = np.where(np.isfinite(acc_final), np.maximum(acc_final, 1.0), np.nan)
             acc_w = np.asarray(accw, dtype=np.float64).ravel()
             acc_s = np.asarray(accs, dtype=np.float64).ravel()
 
-        S = np.clip(np.abs(np.asarray(sd8_proc, dtype=np.float64).ravel()), w_min, w_max)
-        S[~np.isfinite(S)] = w_min
+            S = np.asarray(sd8_proc, dtype=np.float64).ravel().copy()
+            S[(S >= 0.0) & (S < w_min)] = w_min
+            S[S > w_max] = w_max
+            S[S < 0.0] = -1.0
 
     order = _topological_order_d8(receivers)
     valid_flat = valid_mask.ravel()
-    wmean = (acc_w + W) / acc_final
-    smean = (acc_s + S) / acc_final
+    with np.errstate(divide="ignore", invalid="ignore"):
+        wmean = (acc_w + W) / acc_final
+        smean = (acc_s + S) / acc_final
 
-    cell_area = dx * dy
-    area = acc_final * cell_area
-    dup = wmean * smean * np.sqrt(area)
+        cell_area = dx * dy
+        area = acc_final * cell_area
+        dup = wmean * smean * np.sqrt(area)
 
     rows = np.arange(n_nodes, dtype=np.int64) // ncols
     cols = np.arange(n_nodes, dtype=np.int64) % ncols
@@ -562,7 +605,7 @@ def run_connectivity_taudem_arrays(
     dist[receivers == np.arange(n_nodes, dtype=np.int64)] = 0.0
 
     inv_ws = 1.0 / (W * S)
-    ddn = _ddn_d8(dist * inv_ws, inv_ws, receivers, order)
+    ddn = _ddn_weighted_flow_length_d8(dist, inv_ws, receivers, order)
 
     with np.errstate(divide="ignore", invalid="ignore"):
         ic = np.where((dup > 0) & (ddn > 0), np.log10(dup / ddn), np.nan)

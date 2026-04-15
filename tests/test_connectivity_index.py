@@ -14,7 +14,7 @@ from landlab import HexModelGrid
 from landlab import RasterModelGrid
 
 from geomorphconn import ConnectivityIndex
-from geomorphconn.components.connectivity_index import _ddn_d8_py
+from geomorphconn.components.connectivity_index import _ddn_weighted_flow_length_d8_py
 from geomorphconn.weights import (
     CustomWeight,
     LandCoverWeight,
@@ -337,23 +337,24 @@ class TestTargetMode:
 
 
 class TestDdnKernel:
-    def test_terminal_node_ddn_equals_inv_ws(self):
-        """Terminal (outlet/target) gets inv_WS per Borselli (2008) ArcGIS recipe.
-        Chain: 0 -> 1 -> 2 (terminal).
-          ddn[2] = inv_ws[2] = 5.0
-          ddn[1] = dist[1]*inv_ws[1] + ddn[2] = 3.0 + 5.0 = 8.0
-          ddn[0] = dist[0]*inv_ws[0] + ddn[1] = 2.0 + 8.0 = 10.0
-        """
-        local = np.array([2.0, 3.0, 0.0], dtype=np.float64)
-        inv_ws = np.array([1.0, 1.0, 5.0], dtype=np.float64)
-        recv = np.array([1, 2, 2], dtype=np.int64)
-        order = np.array([0, 1, 2], dtype=np.int64)
+        def test_weighted_flow_length_matches_sedinconnect_style(self):
+                """Verify SedInConnect-style D_dn propagation rings and trapezoidal segment cost.
 
-        ddn = _ddn_d8_py(local, inv_ws, recv, order)
+                Chain: 0 -> 1 -> 2 -> 3(terminal)
+                - First two upstream rings from terminal are initialised to 0 then mapped to 1.
+                - Third ring accumulates trapezoidal segment cost.
+                """
+                dist = np.array([2.0, 3.0, 4.0, 0.0], dtype=np.float64)
+                inv_ws = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64)
+                recv = np.array([1, 2, 3, 3], dtype=np.int64)
+                order = np.array([0, 1, 2, 3], dtype=np.int64)
 
-        assert ddn[2] == pytest.approx(5.0)   # terminal = inv_ws
-        assert ddn[1] == pytest.approx(8.0)   # 3.0 + 5.0
-        assert ddn[0] == pytest.approx(10.0)  # 2.0 + 8.0
+                ddn = _ddn_weighted_flow_length_d8_py(dist, inv_ws, recv, order)
+
+                assert np.isnan(ddn[3])
+                assert ddn[2] == pytest.approx(1.0)
+                assert ddn[1] == pytest.approx(1.0)
+                assert ddn[0] == pytest.approx(3.0)
 
 
 # ---------------------------------------------------------------------------
