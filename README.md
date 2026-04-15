@@ -204,7 +204,6 @@ Expected output artifacts:
     - `comparison_metrics.csv`, `comparison_tests.csv`
     - `maps_and_differences.png`, `histograms_and_hexbin.png`, `bland_altman.png`
     - optional stratified outputs (`stratified_metrics_*.csv`, `stratified_*.png`) if stratification rasters are provided
-    - disconnectivity outputs (`disconnectivity_nodes.csv`, `disconnectivity_links.csv`, `disconnectivity_node_metrics.csv`, related figures)
 
 ---
 
@@ -220,7 +219,7 @@ GeomorphConn/
 │   ├── gee/
 │   │   └── fetcher.py              ← GEE/xee data fetcher
 │   ├── analysis/
-│   │   └── cru_dynamics.py, disconnectivity.py
+│   │   └── cru_dynamics.py
 │   ├── utils/
 │   │   └── target.py               ← Target shapefile rasterization
 │   └── weights/
@@ -248,7 +247,7 @@ GeomorphConn/
 └── tests/
     ├── test_connectivity_index.py
     ├── test_cli.py, test_api_utils.py, test_taudem_backend.py
-    └── test_target_utils.py, test_cru_dynamics.py, test_disconnectivity.py
+    └── test_target_utils.py, test_cru_dynamics.py, test_gui_streamlit_app.py
 ```
 
 ---
